@@ -54,3 +54,5 @@
 @media print{.app,.shell{height:auto;overflow:visible}.graph-reading-key{display:flex}.graph-panel>.canvas-wrap{height:400px}}
 
 @media(max-width:700px){.shell{scrollbar-gutter:auto}}
+.graph-focus-action{margin-left:12px;font-size:11px;gap:5px}.graph-focus-action .icon{width:13px;height:13px}.graph-controls .icon-button:disabled{opacity:.35}.graph-controls .zoom-text{min-width:42px;width:auto}
+@media(max-width:700px){.graph-focus-action{display:flex;margin:7px 0 0}.graph-controls .zoom-text{min-width:36px}}
