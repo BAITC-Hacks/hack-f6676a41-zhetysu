@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import (censoring, clusters, config, data, export, features, graphbuild,
-               patterns, priority, robustness, roles)
+               layout, patterns, priority, robustness, roles)
 
 
 def log(msg: str) -> None:
@@ -26,7 +26,7 @@ def log(msg: str) -> None:
 def build_all(data_dir: Path, out_dir: Path) -> dict:
     t0 = time.perf_counter()
 
-    log("[1/8] загрузка данных")
+    log("[1/9] загрузка данных")
     ds = data.load(data_dir)
     stats = data.sanity(ds)
     log(f"      узлов {stats['n_nodes']}, рёбер {stats['n_edges']}, "
@@ -35,13 +35,13 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     log(f"      узлов без рёбер: {stats['n_no_edges']} "
         f"(seed среди них: {stats['n_no_edges_seed']})")
 
-    log("[2/8] сборка направленного взвешенного графа")
+    log("[2/9] сборка направленного взвешенного графа")
     G, UG = graphbuild.build(ds)
 
-    log("[3/8] метрики узлов (структура, деньги, время)")
+    log("[3/9] метрики узлов (структура, деньги, время)")
     feats = features.build(G, ds)
 
-    log("[4/8] модель обрыва обхода: настоящие конечные vs обрезанные 4-м коленом")
+    log("[4/9] модель обрыва обхода: настоящие конечные vs обрезанные 4-м коленом")
     cens, cens_report = censoring.estimate(feats)
     feats = feats.merge(cens, on="gid", how="left")
     log(f"      обрезано обходом: {cens_report['обрезанных_узлов']}, "
@@ -51,7 +51,7 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"cv5 {cens_report['обучение']['auc_cv5']}, "
         f"колено 3 (out-of-depth) {cens_report['валидация_по_коленам']['auc']}")
 
-    log("[5/8] временные паттерны: сквозной транзит, синхронный сбор, дробление")
+    log("[5/9] временные паттерны: сквозной транзит, синхронный сбор, дробление")
     pth = patterns.thresholds(feats)
     flags = patterns.flags(feats, pth)
     feats = feats.merge(flags, on="gid", how="left")
@@ -59,7 +59,7 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"{k}={int(feats[k].sum())}" for k in
         ("flag_fast_transit", "flag_sync_collection", "flag_structuring")))
 
-    log("[6/8] роли по формальным правилам с порогами из распределений")
+    log("[6/9] роли по формальным правилам с порогами из распределений")
     th = roles.thresholds(feats)
     th.update(pth)
     role_tab = roles.assign(feats, th)
@@ -69,7 +69,7 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     log("      роли: " + ", ".join(
         f"{k}={v}" for k, v in nodes.role.value_counts().items()))
 
-    log("[7/8] кластеры (Louvain на неориентированной проекции) и приоритеты")
+    log("[7/9] кластеры (Louvain на неориентированной проекции) и приоритеты")
     nodes["cluster_id"] = clusters.detect(UG, nodes)
     prio = priority.compute(nodes)
     nodes = nodes.merge(prio, on="gid", how="left")
@@ -79,7 +79,16 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"крупнейший: {int(cl_tab.n_nodes.max())} узлов, "
         f"кластеров с 2+ seed: {int((cl_tab.n_seed >= 2).sum())}")
 
-    log("[8/8] устойчивость сети: изъятие топ-N против случайного, и выгрузки")
+    log("[8/9] раскладка: координаты узлов считаются здесь, браузер только рисует")
+    xy, cl_geom, lay_meta = layout.compute(nodes, ds.edges)
+    nodes = nodes.merge(xy, on="gid", how="left")
+    cl_tab = cl_tab.merge(cl_geom, on="cluster_id", how="left")
+    log(f"      панелей: {len(lay_meta['панели'])} "
+        f"(главная {lay_meta['панели'][0]['n_nodes']} узлов), "
+        f"минимальный зазор {lay_meta['минимальный_зазор_между_узлами']}, "
+        f"медианный {lay_meta['медианный_зазор']}")
+
+    log("[9/9] устойчивость сети: изъятие топ-N против случайного, и выгрузки")
     rob = robustness.curves(nodes, ds.edges)
     at20 = rob["summary"]["at_20"]
     log(f"      изъятие топ-20 против случайных 20: оборот на маршрутах от seed "
@@ -93,7 +102,7 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     export.write_graph_json(
         nodes, ds.edges, cl_tab, top,
         {"period": ds.period, "thresholds": th, "censoring": _cens_brief(cens_report),
-         "robustness": rob, "pipeline_seconds": elapsed},
+         "robustness": rob, "layout": lay_meta, "pipeline_seconds": elapsed},
         out_dir)
     export.write_method_artifacts(th, cens_report, rob, out_dir)
 

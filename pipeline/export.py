@@ -36,13 +36,15 @@ NODES_CSV_COLUMNS = [
     "hold_days_median", "fast_out_share", "max_same_day_payers",
     "max_same_day_one_payer_tx", "flag_fast_transit", "flag_sync_collection",
     "flag_structuring", "timing_score", "downstream_nodes",
-    "component_size", "is_articulation",
+    "component_size", "is_articulation", "x", "y",
 ]
 
 CLUSTERS_CSV_COLUMNS = [
     "cluster_id", "n_nodes", "n_seed", "sum_kzt_internal", "top_gids", "hypothesis",
     "n_coordinator", "n_consolidator", "n_distributor", "n_transit", "n_terminal",
     "n_truncated", "kzt_out_of_cluster", "kzt_into_cluster", "max_depth",
+    "center_x", "center_y", "radius", "panel", "angle_start", "angle_end",
+    "r_inner", "r_outer",
 ]
 
 GRAPH_NODE_FIELDS = [
@@ -55,6 +57,7 @@ GRAPH_NODE_FIELDS = [
     "fast_out_share", "max_same_day_payers", "max_same_day_one_payer_tx",
     "flag_fast_transit", "flag_sync_collection", "flag_structuring", "timing_score",
     "downstream_nodes", "component_size", "is_articulation", "why",
+    "x", "y",
 ]
 
 
@@ -185,6 +188,7 @@ def write_graph_json(nodes: pd.DataFrame, edges: pd.DataFrame,
             "rule_counts": {k: int(v) for k, v in
                             nodes.rule_id.str.split(":").str[0].value_counts().items()},
             "robustness": meta_extra["robustness"],
+            "layout": meta_extra["layout"],
             "method": {
                 "thresholds": meta_extra["thresholds"],
                 "priority_weights": C.PRIORITY_WEIGHTS,

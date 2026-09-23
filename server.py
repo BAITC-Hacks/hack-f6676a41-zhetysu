@@ -24,6 +24,47 @@ OUT = ROOT / "out"
 app = FastAPI(title="Граф денег", docs_url=None, redoc_url=None)
 
 
+_graph_cache: dict = {"mtime": None, "graph": None}
+
+
+def _graph():
+    """Граф в памяти, перечитывается при изменении файла."""
+    import ask as ask_mod
+
+    path = OUT / "graph.json"
+    if not path.exists():
+        return None
+    mtime = path.stat().st_mtime
+    if _graph_cache["mtime"] != mtime:
+        _graph_cache["graph"] = ask_mod.Graph(path)
+        _graph_cache["mtime"] = mtime
+    return _graph_cache["graph"]
+
+
+@app.post("/api/ask")
+async def api_ask(payload: dict):
+    """Вопрос словами → ответ по графу. Цифры считаются по данным, не моделью."""
+    import ask as ask_mod
+
+    question = (payload or {}).get("q", "").strip()
+    if not question:
+        return JSONResponse({"error": "пустой вопрос"}, status_code=400)
+    g = _graph()
+    if g is None:
+        return JSONResponse({"error": "выгрузки ещё не посчитаны"}, status_code=503)
+
+    found = ask_mod.answer(g, question)
+    text, origin = ask_mod.polish(found["text"], question)
+    return JSONResponse({
+        "question": question,
+        "answer": text,
+        "raw": found["text"],
+        "nodes": found["nodes"],
+        "source": found["source"],
+        "phrasing": origin,
+    })
+
+
 @app.get("/api/health")
 def health():
     """Что сейчас готово — чтобы не гадать по пустому экрану."""
