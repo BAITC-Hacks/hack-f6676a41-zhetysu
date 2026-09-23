@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
+from .fmt import n_days, n_inflows, n_payers, n_tx
 
 
 def thresholds(df: pd.DataFrame) -> dict:
@@ -103,16 +104,15 @@ def note(f: pd.Series) -> str:
     """Короткая приписка к evidence — только по сработавшим признакам."""
     bits = []
     if f.get("flag_sync_collection"):
-        bits.append(f"{int(f.max_same_day_payers)} плательщиков в один день")
+        bits.append(f"{n_payers(f.max_same_day_payers)} в один день")
     if f.get("flag_fast_transit"):
-        hold = f.get("hold_days_median")
-        d = "0" if pd.isna(hold) else f"{hold:.0f}"
-        bits.append(f"сквозной транзит за {d} дн. ({100 * f.fast_out_share:.0f}% суммы)")
+        bits.append(f"сквозной транзит за {n_days(f.get('hold_days_median'))} "
+                    f"({100 * f.fast_out_share:.0f}% суммы)")
     if f.get("flag_structuring"):
         if f.max_same_day_one_payer_tx >= 3:
-            bits.append(f"дробление: {int(f.max_same_day_one_payer_tx)} перевода "
+            bits.append(f"дробление: {n_tx(f.max_same_day_one_payer_tx)} "
                         f"от одного плательщика за день")
         else:
-            bits.append(f"дробление: {int(f.in_tx)} поступлений по "
+            bits.append(f"дробление: {n_inflows(f.in_tx)} по "
                         f"{f.avg_in_tx_kzt / 1000:.0f} тыс. в среднем")
     return "; ".join(bits)

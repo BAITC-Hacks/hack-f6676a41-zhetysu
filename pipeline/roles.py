@@ -36,6 +36,7 @@ import pandas as pd
 
 from . import config as C
 from . import patterns
+from .fmt import money as _m, pct as _pt, n_tx, n_payers, n_receivers
 
 
 # ------------------------------------------------------------------ пороги
@@ -99,25 +100,6 @@ def thresholds(df: pd.DataFrame) -> dict:
             "смысл": "не объявляем конечным того, чьи исходящие никто не выгружал",
         },
     }
-
-
-# ------------------------------------------------------------------ формат
-
-def _m(x: float) -> str:
-    """Деньги человекочитаемо."""
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "0"
-    if x >= 1_000_000:
-        return f"{x / 1_000_000:.1f} млн".replace(".0 млн", " млн")
-    if x >= 1_000:
-        return f"{x / 1_000:.0f} тыс."
-    return f"{x:.0f}"
-
-
-def _pt(x) -> str:
-    if x is None or (isinstance(x, float) and np.isnan(x)):
-        return "—"
-    return f"{100 * x:.0f}%"
 
 
 # ------------------------------------------------------------------ правила
@@ -300,10 +282,24 @@ def _with_pattern(base: str, f: pd.Series) -> str:
     note = patterns.note(f)
     if not note:
         return base[:LIMIT]
-    tail = " | " + note
-    if len(tail) >= LIMIT:
-        return tail[3:LIMIT]
-    return base[:LIMIT - len(tail)].rstrip(" ,;") + tail
+
+    # сначала пробуем уместить все признаки, потом отбрасываем лишние —
+    # обоснование роли важнее полноты приписки
+    bits = note.split("; ")
+    for k in range(len(bits), 0, -1):
+        tail = " | " + "; ".join(bits[:k])
+        if len(base) + len(tail) <= LIMIT:
+            return base + tail
+
+    # не влезает даже один признак — режем основу по смысловой границе,
+    # а не посреди слова
+    tail = " | " + bits[0]
+    cut = base[:max(LIMIT - len(tail), 0)]
+    for sep in ("; ", ", ", " "):
+        if sep in cut:
+            cut = cut[:cut.rfind(sep)]
+            break
+    return (cut + tail)[:LIMIT]
 
 
 def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
@@ -312,16 +308,16 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
     seed_note = f", из них seed: {int(f.n_seed_payers)}" if f.n_seed_payers else ""
 
     if role == "coordinator":
-        s = (f"получает {_m(f.in_kzt)} KZT (топ-5% графа) от {int(f.in_deg)} "
-             f"плательщиков{seed_note}; {int(f.get('n_collector_payers', 0))} из них "
+        s = (f"получает {_m(f.in_kzt)} KZT (топ-5% графа) от "
+             f"{n_payers(f.in_deg)}{seed_note}; {int(f.get('n_collector_payers', 0))} из них "
              f"сами собирают от {th['in_deg_consolidator']['value']}+ плательщиков; "
              f"отдаёт дальше {_pt(f.pass_through)}")
     elif role == "consolidator":
-        s = (f"сходятся {int(f.in_deg)} плательщиков{seed_note} на {int(f.out_deg)} выход(а); "
+        s = (f"сходятся {n_payers(f.in_deg)}{seed_note} на {n_receivers(f.out_deg)}; "
              f"получено {_m(f.in_kzt)} KZT, отдано дальше {_pt(f.pass_through)}, "
              f"осело {_m(f.retained_kzt)} KZT")
     elif role == "distributor":
-        s = (f"веер на {int(f.out_deg)} получателей, {int(f.out_tx)} переводов "
+        s = (f"веер на {n_receivers(f.out_deg)}, {n_tx(f.out_tx)} "
              f"на {_m(f.out_kzt)} KZT")
         if f.is_seed:
             s += "; seed — входящие извне выборки не видны"
@@ -329,11 +325,11 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
             s += f"; отдал на {_m(f.unseen_inflow_kzt)} KZT больше, чем получил в выборке"
     elif role == "transit":
         if f.is_seed:
-            s = (f"seed: отдаёт {_m(f.out_kzt)} KZT на {int(f.out_deg)} получателей; "
+            s = (f"seed: отдаёт {_m(f.out_kzt)} KZT на {n_receivers(f.out_deg)}; "
                  f"входящие извне выборки не видны, роль по исходящему профилю")
         elif f.unseen_inflow_kzt > 0 and (pd.isna(f.pass_through) or
                                           f.pass_through > C.TRANSIT_PT_HIGH):
-            s = (f"отдал {_m(f.out_kzt)} KZT на {int(f.out_deg)} получателей при "
+            s = (f"отдал {_m(f.out_kzt)} KZT на {n_receivers(f.out_deg)} при "
                  f"поступлениях {_m(f.in_kzt)} KZT: {_m(f.unseen_inflow_kzt)} KZT пришло "
                  f"вне выборки (собраны только исходящие); удержания нет")
         else:
@@ -346,15 +342,15 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
             mat = th["materiality_kzt"]["value"]
             size = ("" if f.in_kzt >= mat else
                     f"; сумма ниже медианы графа {_m(mat)} KZT — мелкий получатель")
-            s = (f"получил {_m(f.in_kzt)} KZT, переводов {int(f.in_tx)}, плательщиков "
-                 f"{int(f.in_deg)}{seed_note}; исходящих переводов 0, и они проверены "
+            s = (f"получил {_m(f.in_kzt)} KZT, {n_tx(f.in_tx)} от "
+                 f"{n_payers(f.in_deg)}{seed_note}; исходящих переводов 0, они проверены "
                  f"обходом на колене {int(f.depth)}{size}")
         elif f.terminal_status == "unknown_truncated":
             s = (f"получил {_m(f.in_kzt)} KZT от {int(f.in_deg)}; обход обрезан 4-м коленом, "
                  f"вероятность что конечный {f.terminal_p:.2f} по модели на коленах 1-3")
         else:
             s = (f"из {_m(f.in_kzt)} KZT дальше ушло только {_pt(f.pass_through)} "
-                 f"({_m(f.out_kzt)} KZT на {int(f.out_deg)}), осело {_m(f.retained_kzt)} KZT "
+                 f"({_m(f.out_kzt)} KZT на {n_receivers(f.out_deg)}), осело {_m(f.retained_kzt)} KZT "
                  f"— сумма остановилась здесь")
     else:  # peripheral
         if f.in_deg == 0 and f.out_deg == 0:

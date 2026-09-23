@@ -82,10 +82,12 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     log("[8/8] устойчивость сети: изъятие топ-N против случайного, и выгрузки")
     rob = robustness.curves(nodes, ds.edges)
     at20 = rob["summary"]["at_20"]
-    log(f"      изъятие 20 узлов: крупнейшая компонента {at20['targeted_lcc_share']:.2f} "
-        f"против {at20['random_lcc_share']:.2f} при случайном выборе "
-        f"(в {at20['lcc_ratio']} раза), отрезано оборота "
-        f"{at20['targeted_cut_kzt_share']:.1%} против {at20['random_cut_kzt_share']:.1%}")
+    log(f"      изъятие топ-20 против случайных 20: оборот на маршрутах от seed "
+        f"остаётся {at20['targeted_seed_reach_kzt_share']:.1%} против "
+        f"{at20['random_seed_reach_kzt_share']:.1%}, отрезано оборота "
+        f"{at20['targeted_cut_kzt_share']:.1%} против {at20['random_cut_kzt_share']:.1%} "
+        f"(в {at20['cut_ratio']} раза), крупнейшая компонента "
+        f"{at20['targeted_lcc_share']:.2f} против {at20['random_lcc_share']:.2f}")
     elapsed = round(time.perf_counter() - t0, 2)
     export.write_csv(nodes, cl_tab, top, out_dir)
     export.write_graph_json(

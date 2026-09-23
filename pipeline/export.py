@@ -78,6 +78,34 @@ def _clean(v):
     return v
 
 
+def _terminal_breakdown(nodes: pd.DataFrame, thresholds: dict) -> dict:
+    """Ответ на вопрос «почему у вас больше половины сети — конечные получатели».
+
+    Роль terminal складывается из трёх разных оснований, и их надо показывать
+    раздельно: подтверждённое наблюдением отсутствие исходящих, осаждение суммы
+    при наличии исходящих и вероятностная оценка для обрезанных обходом узлов.
+    """
+    t = nodes[nodes.role == "terminal"]
+    mat = thresholds["materiality_kzt"]["value"]
+    rules = t.rule_id.str.split(":").str[0]
+    return {
+        "всего": int(len(t)),
+        "доля_узлов_графа": round(float(len(t) / len(nodes)), 3),
+        "R4a_исходящих_нет_проверено_обходом": int((rules == "R4a.terminal").sum()),
+        "R4b_осело_почти_всё_при_наличии_исходящих": int((rules == "R4b.terminal").sum()),
+        "R4c_обрезан_обходом_вероятность_не_ниже_порога":
+            int((rules == "R4c.terminal").sum()),
+        "из_них_материальных": int((t.in_kzt >= mat).sum()),
+        "из_них_ниже_медианы_графа": int((t.in_kzt < mat).sum()),
+        "осело_kzt": round(float(t.retained_kzt.sum()), 2),
+        "пояснение": (
+            "граф собран по исходящим переводам от 81 seed на 4 колена, поэтому "
+            "нижний слой выгрузки по построению состоит из получателей; у "
+            f"{int((rules == 'R4a.terminal').sum())} узлов отсутствие исходящих "
+            "проверено самим обходом, а не выведено из out_deg = 0"),
+    }
+
+
 def write_csv(nodes: pd.DataFrame, clusters: pd.DataFrame,
               top: pd.DataFrame, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -177,8 +205,11 @@ def write_graph_json(nodes: pd.DataFrame, edges: pd.DataFrame,
     tmp.replace(path)   # интерфейс читает файл целиком — подменяем атомарно
 
 
-def write_method_artifacts(thresholds: dict, censoring: dict, out_dir: Path) -> None:
+def write_method_artifacts(thresholds: dict, censoring: dict,
+                           robustness: dict, out_dir: Path) -> None:
     (out_dir / "thresholds.json").write_text(
         json.dumps(thresholds, ensure_ascii=False, indent=2), encoding="utf-8")
     (out_dir / "censoring_report.json").write_text(
         json.dumps(censoring, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (out_dir / "robustness_report.json").write_text(
+        json.dumps(robustness, ensure_ascii=False, indent=2), encoding="utf-8")

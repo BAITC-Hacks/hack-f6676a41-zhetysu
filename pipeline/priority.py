@@ -27,7 +27,7 @@ import pandas as pd
 
 from . import config as C
 from . import patterns
-from .roles import _m, _pt
+from .fmt import money as _m, pct as _pt, n_payers, n_receivers
 
 KNOWN_SEED_DISCOUNT = 0.5
 
@@ -79,9 +79,9 @@ def _why(f: pd.Series, c: pd.Series, s: float) -> str:
     facts = []
     if f.in_deg:
         seed_part = f" (seed: {int(f.n_seed_payers)})" if f.n_seed_payers else ""
-        facts.append(f"вход {_m(f.in_kzt)} KZT от {int(f.in_deg)} плательщиков{seed_part}")
+        facts.append(f"вход {_m(f.in_kzt)} KZT от {n_payers(f.in_deg)}{seed_part}")
     if f.out_deg:
-        facts.append(f"выход {_m(f.out_kzt)} KZT на {int(f.out_deg)} получателей")
+        facts.append(f"выход {_m(f.out_kzt)} KZT на {n_receivers(f.out_deg)}")
     if f.retained_kzt > 0:
         facts.append(f"осело {_m(f.retained_kzt)} KZT")
     if f.role == "transit" and not pd.isna(f.pass_through):

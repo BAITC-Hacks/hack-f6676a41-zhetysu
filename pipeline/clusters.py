@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
-from .roles import _m
+from .fmt import money as _m
 
 
 def detect(UG: nx.Graph, df: pd.DataFrame) -> pd.Series:
