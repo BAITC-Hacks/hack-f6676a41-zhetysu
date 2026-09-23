@@ -65,7 +65,7 @@ def thresholds(df: pd.DataFrame) -> dict:
         },
         "materiality_kzt": {
             "value": round(materiality, 2),
-            "правило": f"медиана in_kzt среди узлов с поступлениями",
+            "правило": "медиана in_kzt среди узлов с поступлениями",
             "смысл": "ниже этой суммы узел не характеризует структуру группы",
         },
         "money_high_kzt": {

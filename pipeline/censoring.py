@@ -193,7 +193,8 @@ def estimate(feats: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     report = {
         "задача": "отделить настоящих конечных получателей от узлов, обрезанных 4-м коленом",
-        "модель": "логистическая регрессия (IRLS, ridge=1e-3) на 6 признаках входящего профиля",
+        "модель": (f"логистическая регрессия (IRLS, ridge=1e-3) на {len(FEATURES)} признаках "
+                   f"входящего профиля узла и его плательщиков"),
         "признаки": [FEATURE_LABELS[f] for f in FEATURES],
         "коэффициенты": {"intercept": round(float(w[0]), 4),
                          **{FEATURES[i]: round(float(w[i + 1]), 4) for i in range(len(FEATURES))}},
@@ -217,6 +218,6 @@ def estimate(feats: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "распределение_статусов": status.value_counts().to_dict(),
         "решение": ("роль terminal обрезанному узлу присваивается только при "
                     "terminal_p >= 0.70, role_score равен этой вероятности; "
-                    "остальные обрезанные узлы получают роль по входящему профилю"),
+                    "остальные обрезанные узлы остаются peripheral с вероятностью в evidence"),
     }
     return out, report

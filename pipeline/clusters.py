@@ -18,7 +18,6 @@ cluster_id = -1 («вне сети»), и по нему тоже есть стр
 from __future__ import annotations
 
 import networkx as nx
-import numpy as np
 import pandas as pd
 
 from . import config as C

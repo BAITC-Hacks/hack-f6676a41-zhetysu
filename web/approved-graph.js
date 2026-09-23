@@ -45,7 +45,7 @@ class ApprovedGraph {
  }
  refreshTheme(){
   const s=getComputedStyle(document.body),v=(key,fallback)=>s.getPropertyValue('--'+key).trim()||fallback;
-  this.colors={panel:v('panel','#fff'),canvas:v('canvas','#fbfcfc'),text:v('ink','#1c2b31'),muted:v('muted','#748187'),soft:v('soft-text','#53666b'),line:v('line','#e7eceb'),green:v('green','#147a5b'),greenSoft:v('green-soft','#eaf5ee'),blue:v('blue','#5686bf'),blueSoft:v('blue-soft','#edf4fc'),amber:v('amber','#a67427'),edgeIn:v('edge-in','#aebed4'),edgeOut:v('edge-out','#b3cec0')};
+  this.colors={panel:v('panel','#fff'),canvas:v('canvas','#fbfcfc'),text:v('ink','#1c2b31'),muted:v('muted','#748187'),soft:v('soft-text','#53666b'),line:v('line','#e7eceb'),green:v('green','#147a5b'),greenSoft:v('green-soft','#eaf5ee'),blue:v('blue','#5686bf'),blueSoft:v('blue-soft','#edf4fc'),amber:v('amber','#a67427'),violet:v('violet','#8162b3'),edgeIn:v('edge-in','#aebed4'),edgeOut:v('edge-out','#b3cec0')};
   this.font=v('font','-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif');this.mono=v('mono','Consolas, monospace');
   this.dark=document.documentElement.dataset.theme==='dark'||document.body.dataset.theme==='dark'||document.body.classList.contains('dark'); this.request();
  }
@@ -195,11 +195,11 @@ class ApprovedGraph {
    const incoming=this.directIn?.has(id),reciprocal=incoming&&this.directOut?.has(id),isSelected=id===selected,signal=this.signals(p.n).length,color=incoming?col.blue:col.green;
    c.globalAlpha=p.alpha*lod*(this.hover&&this.hover!==id&&!this.isNeighbor(this.hover,id)?.4:1);
    if(p.core>.01){const alpha=c.globalAlpha;for(const[scale,opacity]of[[2.05,.045],[1.52,.06]]){c.globalAlpha=alpha*opacity*p.core;c.fillStyle=col.green;c.beginPath();c.arc(q.x,q.y,r*scale,0,Math.PI*2);c.fill();}c.globalAlpha=alpha;c.strokeStyle=col.green;c.lineWidth=1;c.globalAlpha*=.4*p.core;c.beginPath();c.arc(q.x,q.y,r+7,0,Math.PI*2);c.stroke();c.globalAlpha=alpha;}
-   if(!local&&signal){const d=Math.max(3,r*1.32);c.fillStyle=col.amber;c.beginPath();c.moveTo(q.x,q.y-d);c.lineTo(q.x+d,q.y);c.lineTo(q.x,q.y+d);c.lineTo(q.x-d,q.y);c.closePath();c.fill();if(p.n.is_seed){c.fillStyle=col.green;c.beginPath();c.arc(q.x,q.y,Math.max(1,Math.min(1.7,r*.43)),0,Math.PI*2);c.fill();}}else{c.fillStyle=local?(incoming?col.blueSoft:col.greenSoft):(p.n.is_seed?col.green:col.soft);c.strokeStyle=local?color:col.panel;c.lineWidth=local?1.5:0;c.beginPath();c.arc(q.x,q.y,r,0,Math.PI*2);c.fill();if(local)c.stroke();if(p.core>.001){const alpha=c.globalAlpha;c.globalAlpha*=p.core;c.fillStyle=col.green;c.fill();c.globalAlpha=alpha;}}
+   if(!local&&signal){c.fillStyle=p.n.is_seed?col.violet:col.amber;c.beginPath();c.arc(q.x,q.y,r,0,Math.PI*2);c.fill();}else{c.fillStyle=local?(incoming?col.blueSoft:col.greenSoft):(p.n.is_seed?col.green:col.soft);c.strokeStyle=local?color:col.panel;c.lineWidth=local?1.5:0;c.beginPath();c.arc(q.x,q.y,r,0,Math.PI*2);c.fill();if(local)c.stroke();if(p.core>.001){const alpha=c.globalAlpha;c.globalAlpha*=p.core;c.fillStyle=col.green;c.fill();c.globalAlpha=alpha;}}
    if(local&&p.core<.5){c.fillStyle=color;c.beginPath();c.arc(q.x,q.y,Math.max(2,r*.27),0,Math.PI*2);c.fill();}
    if((!local||!flow)&&isSelected){c.strokeStyle=col.green;c.lineWidth=2;c.beginPath();c.arc(q.x,q.y,r+5,0,Math.PI*2);c.stroke();}
    if(p.core>.05)this.paintCore(p,q,r);
-   if(signal&&local){const sx=q.x+r*.85,sy=q.y-r*.85,s=3.6;c.fillStyle=col.panel;c.strokeStyle=col.amber;c.lineWidth=1.5;c.beginPath();c.moveTo(sx,sy-s);c.lineTo(sx+s,sy);c.lineTo(sx,sy+s);c.lineTo(sx-s,sy);c.closePath();c.fill();c.stroke();}
+   if(signal&&local){const sx=q.x+r*.85,sy=q.y-r*.85,s=3.6;c.fillStyle=col.panel;c.strokeStyle=col.amber;c.lineWidth=1.5;c.beginPath();c.arc(sx,sy,s,0,Math.PI*2);c.fill();c.stroke();}
    if(flow&&p.core<.7)this.paintNodeLabel(p,q,reciprocal,incoming);
   }
   if(!flow){const labelPoints=points.filter(([id,p])=>this.drawnIds.has(id)&&p.alpha>.4).sort(([a,pa],[b,pb])=>Number(b===selected)-Number(a===selected)||Number(b===this.hover)-Number(a===this.hover)||(Number(pb.n.priority_score)||0)-(Number(pa.n.priority_score)||0));for(const[id,p]of labelPoints){c.globalAlpha=p.alpha*(this.lodAlpha.get(id)||0);this.paintMapLabel(p,this.project(p));}}
