@@ -65,7 +65,11 @@ def _why(f: pd.Series, c: pd.Series, s: float) -> str:
     """Обоснование позиции в топ-листе: что именно вытолкнуло узел наверх."""
     contrib = {k: C.PRIORITY_WEIGHTS[k] * c[k] for k in C.PRIORITY_WEIGHTS}
     top = sorted(contrib, key=contrib.get, reverse=True)[:3]
-    drivers = ", ".join(COMPONENT_LABELS[k] for k in top)
+    # у каждой причины указываем, в какие верхние проценты графа попал узел
+    drivers = ", ".join(
+        f"{COMPONENT_LABELS[k]} (верхние {max(1, round(100 * (1 - c[k])))}%)"
+        if k != "role" else f"{COMPONENT_LABELS[k]} ({f.role})"
+        for k in top)
 
     facts = []
     if f.in_deg:
@@ -91,4 +95,5 @@ def top_nodes(df: pd.DataFrame, n: int = 30) -> pd.DataFrame:
     t = (df.sort_values(["priority_score", "gid"], ascending=[False, True])
            .head(n).reset_index(drop=True))
     t.insert(0, "rank", np.arange(1, len(t) + 1))
-    return t[["rank", "gid", "role", "priority_score", "why"]]
+    return t[["rank", "gid", "role", "priority_score", "why",
+              "cluster_id", "role_score", "rule_id"]]

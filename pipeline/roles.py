@@ -12,12 +12,17 @@
 
 Порядок приоритета правил (первое сработавшее побеждает):
 
-    0. нет рёбер в выгрузке        → peripheral
-    1. веер получателей            → distributor
-    2. сходимость плательщиков     → consolidator
-    3. пропуск средств дальше      → transit
-    4. деньги остались             → terminal
-    5. иначе                       → peripheral
+    0. нет рёбер в выгрузке                          → peripheral
+    1. веер получателей                              → distributor
+    2. сходимость плательщиков + неполный вывод       → consolidator
+    3. пропуск средств дальше почти в полном объёме   → transit
+    4. деньги остались (нет исходящих либо осело ≥…%) → terminal
+    5. смешанный профиль ниже всех порогов            → peripheral
+
+Ядро системы правил — три зоны по доле пропуска out_kzt/in_kzt: «прошло почти
+всё» (транзит), «почти всё осело» (конечный получатель), «между» (смешанный
+профиль, роль не утверждаем). Границы зон взяты из распределения, а число
+плательщиков и получателей отделяет сбор от веерной рассылки.
 
 Затем отдельным проходом выделяется coordinator — узел, стоящий НАД точками
 сбора: его плательщики сами являются consolidator/distributor, либо он
@@ -42,6 +47,8 @@ def thresholds(df: pd.DataFrame) -> dict:
     money_t = float(df[["in_kzt", "out_kzt"]].max(axis=1).quantile(C.Q_MONEY))
     in_money_t = float(df.in_kzt.quantile(C.Q_MONEY))
     betw_t = float(df.betweenness.quantile(C.Q_BETWEENNESS))
+    fwd = df[(df.in_kzt > 0) & (df.out_deg > 0) & (~df.is_seed)]
+    ret_t = float(fwd.pass_through.quantile(C.Q_RETENTION_TERMINAL))
     return {
         "in_deg_consolidator": {
             "value": max(in_deg_t, 3),
@@ -72,6 +79,13 @@ def thresholds(df: pd.DataFrame) -> dict:
             "value": round(betw_t, 8),
             "правило": f"квантиль {C.Q_BETWEENNESS} betweenness",
             "смысл": "«узел стоит между» = верхний 1% по посредничеству",
+        },
+        "retention_pass_through": {
+            "value": round(ret_t, 3),
+            "правило": (f"out_kzt/in_kzt <= квантиль {C.Q_RETENTION_TERMINAL} распределения "
+                        f"pass_through среди узлов, передающих дальше (не seed)"),
+            "смысл": (f"деньги фактически осели: ниже этого порога на счёте остаётся "
+                      f"более {100 * (1 - ret_t):.0f}% поступившего"),
         },
         "transit_pass_through": {
             "value": [C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH],
@@ -112,6 +126,7 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     T_IN = th["in_deg_consolidator"]["value"]
     T_OUT = th["out_deg_distributor"]["value"]
     MAT = th["materiality_kzt"]["value"]
+    RET = th["retention_pass_through"]["value"]
 
     role = pd.Series("peripheral", index=df.index, dtype=object)
     score = pd.Series(0.5, index=df.index, dtype=float)
@@ -129,16 +144,24 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     # --- 1. distributor: веерная рассылка -----------------------------------
     m_dist = (df.out_deg >= T_OUT) & ~no_edges
 
-    # --- 2. consolidator: сходимость многих плательщиков в немногие выходы ---
+    # --- 2. consolidator: сходимость многих плательщиков + деньги не выводятся
+    # целиком. Достаточно одного из двух признаков сужения: мало выходов ЛИБО
+    # дальше уходит не более половины полученного.
     fan_ok = df.out_deg <= np.maximum(2, C.CONSOLIDATOR_FANOUT_RATIO * df.in_deg)
-    m_cons = (df.in_deg >= T_IN) & fan_ok & ~m_dist & ~no_edges
+    keep_ok = df.pass_through.fillna(0.0) <= C.CONSOLIDATOR_MAX_PT
+    m_cons = (df.in_deg >= T_IN) & (fan_ok | keep_ok) & ~m_dist & ~no_edges
 
     # --- 3. transit: деньги прошли дальше ------------------------------------
     pt_band = pt.between(C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH)
     fast_transit = (fast >= 0.6) & (pt >= 0.6)
+    # R3b: узел отдал БОЛЬШЕ, чем получил по данным. Это не аномалия: граф собран
+    # только по исходящим, поэтому часть притока к узлу не выгружалась. Удержания
+    # у такого узла нет по определению — это транзит, вводящий в сеть средства,
+    # источник которых в выборке не виден.
+    unseen_source = pt > C.TRANSIT_PT_HIGH
     # для seed pass_through неинформативен (ловушка 2) — только исходящий профиль
     m_trans = (~m_dist & ~m_cons & ~no_edges & (df.out_deg >= 1) &
-               (((pt_band | fast_transit) & ~df.is_seed) |
+               (((pt_band | fast_transit | unseen_source) & ~df.is_seed) |
                 (df.is_seed & (df.out_deg >= 1))))
 
     # --- 4. terminal: деньги пришли и остались -------------------------------
@@ -146,8 +169,12 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     # материальность влияет на role_score и на приоритет, но не на роль.
     observed_sink = df.terminal_status == "observed_sink"
     trunc = df.terminal_status == "unknown_truncated"
+    # R4b: исходящие есть, но они не выводят сумму — на счёте осталось больше
+    # (1 - RET) доли поступившего. Для seed не применяем: их вход занижен.
+    settled = (df.out_deg > 0) & (~df.is_seed) & (df.pass_through <= RET)
     m_term = (~m_dist & ~m_cons & ~m_trans & ~no_edges & (df.in_kzt > 0) &
-              (observed_sink | (trunc & (df.terminal_p >= C.TERMINAL_P_MIN))))
+              (observed_sink | settled |
+               (trunc & (df.terminal_p >= C.TERMINAL_P_MIN))))
 
     # --- применяем в порядке приоритета -------------------------------------
     role[m_dist] = "distributor"
@@ -161,29 +188,43 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     score[m_cons] = np.minimum(1.0, base + 0.1 * keeps)
 
     role[m_trans] = "transit"
-    rule[m_trans] = (f"R3.transit: pass_through в [{C.TRANSIT_PT_LOW}, {C.TRANSIT_PT_HIGH}] "
-                     f"либо >=60% исходящих в пределах {C.FAST_TRANSIT_DAYS} суток")
     tr_pt = pt[m_trans]
-    tr_score = np.where(
-        tr_pt.between(C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH),
-        1.0 - 0.5 * (tr_pt - 1.0).abs() / 0.2,
-        0.5 + 0.2 * fast[m_trans])
-    # у seed вход занижен: уверенность в роли ограничиваем
-    tr_score = np.where(df.loc[m_trans, "is_seed"], 0.55, tr_score)
+    rule[m_trans] = np.select(
+        [df.loc[m_trans, "is_seed"].to_numpy(),
+         tr_pt.between(C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH).to_numpy(),
+         unseen_source[m_trans].to_numpy()],
+        ["R3c.transit: seed — роль по исходящему профилю, входящие извне не видны",
+         f"R3a.transit: pass_through в [{C.TRANSIT_PT_LOW}, {C.TRANSIT_PT_HIGH}] — "
+         f"прошло почти всё полученное",
+         f"R3b.transit: pass_through > {C.TRANSIT_PT_HIGH} — отдал больше, чем получил "
+         f"по данным, приток извне выборки"],
+        default=f"R3d.transit: >=60% исходящих в пределах {C.FAST_TRANSIT_DAYS} суток "
+                f"после поступления")
+    tr_score = np.select(
+        [df.loc[m_trans, "is_seed"].to_numpy(),
+         tr_pt.between(C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH).to_numpy(),
+         unseen_source[m_trans].to_numpy()],
+        [0.55,                                        # seed: вход занижен
+         1.0 - 0.5 * (tr_pt - 1.0).abs() / 0.2,        # чем ближе к 1.0, тем выше
+         0.6],                                        # часть потока не наблюдаема
+        default=0.5 + 0.2 * fast[m_trans])
     score[m_trans] = np.clip(np.nan_to_num(tr_score, nan=0.5), 0.4, 1.0)
 
     role[m_term] = "terminal"
-    # подтверждённый наблюдением сток: 0.9, если сумма материальна, иначе 0.65;
-    # обрезанный обходом: уверенность равна вероятности по модели
-    term_score = np.where(
-        observed_sink[m_term],
-        np.where(df.loc[m_term, "in_kzt"] >= MAT, 0.9, 0.65),
-        df.loc[m_term, "terminal_p"])
-    score[m_term] = term_score
-    rule[m_term] = np.where(
-        observed_sink[m_term],
-        "R4.terminal: out_deg = 0 при наблюдаемых исходящих (depth <= 3)",
-        f"R4.terminal: обрезан 4-м коленом, terminal_p >= {C.TERMINAL_P_MIN}")
+    # уверенность в роли: подтверждённый наблюдением сток — 0.9 при материальной
+    # сумме и 0.65 ниже неё; осаждение при наличии исходящих — по доле осевшего;
+    # обрезанный обходом — ровно вероятность по модели, без округления вверх
+    sub = df.loc[m_term]
+    score[m_term] = np.select(
+        [observed_sink[m_term], settled[m_term]],
+        [np.where(sub.in_kzt >= MAT, 0.9, 0.65),
+         np.clip(1.0 - sub.pass_through.fillna(0.0), 0.6, 0.85)],
+        default=sub.terminal_p.fillna(0.5))
+    rule[m_term] = np.select(
+        [observed_sink[m_term], settled[m_term]],
+        ["R4a.terminal: исходящих переводов нет, они проверены обходом (depth <= 3)",
+         f"R4b.terminal: дальше уходит не более {RET:.0%} полученного — сумма осела"],
+        default=f"R4c.terminal: обрезан 4-м коленом, terminal_p >= {C.TERMINAL_P_MIN}")
 
     score[no_edges] = 0.3
     rule[no_edges] = "R0.peripheral: нет рёбер в выгрузке"
@@ -269,6 +310,11 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
         if f.is_seed:
             s = (f"seed: отдаёт {_m(f.out_kzt)} KZT на {int(f.out_deg)} получателей; "
                  f"входящие извне выборки не видны, роль по исходящему профилю")
+        elif f.unseen_inflow_kzt > 0 and (pd.isna(f.pass_through) or
+                                          f.pass_through > C.TRANSIT_PT_HIGH):
+            s = (f"отдал {_m(f.out_kzt)} KZT на {int(f.out_deg)} получателей при "
+                 f"поступлениях {_m(f.in_kzt)} KZT: {_m(f.unseen_inflow_kzt)} KZT пришло "
+                 f"вне выборки (собраны только исходящие); удержания нет")
         else:
             hold = f.get("hold_days_median")
             hold_s = "" if pd.isna(hold) else f", деньги лежат {hold:.0f} дн."
@@ -276,12 +322,16 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
                  f"от {int(f.in_deg)}, выход {_m(f.out_kzt)} KZT на {int(f.out_deg)}{hold_s}")
     elif role == "terminal":
         if f.terminal_status == "observed_sink":
-            s = (f"получил {_m(f.in_kzt)} KZT ({int(f.in_tx)} перевод(ов)) от "
-                 f"{int(f.in_deg)} плательщиков{seed_note} и не отправил дальше 0 KZT; "
-                 f"колено {int(f.depth)} — исходящие проверены обходом")
-        else:
+            s = (f"получил {_m(f.in_kzt)} KZT, переводов {int(f.in_tx)}, плательщиков "
+                 f"{int(f.in_deg)}{seed_note}; исходящих переводов 0, и они проверены "
+                 f"обходом на колене {int(f.depth)}")
+        elif f.terminal_status == "unknown_truncated":
             s = (f"получил {_m(f.in_kzt)} KZT от {int(f.in_deg)}; обход обрезан 4-м коленом, "
                  f"вероятность что конечный {f.terminal_p:.2f} по модели на коленах 1-3")
+        else:
+            s = (f"из {_m(f.in_kzt)} KZT дальше ушло только {_pt(f.pass_through)} "
+                 f"({_m(f.out_kzt)} KZT на {int(f.out_deg)}), осело {_m(f.retained_kzt)} KZT "
+                 f"— сумма остановилась здесь")
     else:  # peripheral
         if f.in_deg == 0 and f.out_deg == 0:
             s = ("0 входящих и 0 исходящих переводов в выгрузке: seed без рёбер, "
@@ -291,7 +341,8 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
                  f"вероятность что конечный {f.terminal_p:.2f} — роль не присваиваем")
         else:
             s = (f"вход {_m(f.in_kzt)} KZT от {int(f.in_deg)}, выход {_m(f.out_kzt)} KZT "
-                 f"на {int(f.out_deg)} — ниже порогов ролей "
-                 f"(порог сбора {th['in_deg_consolidator']['value']} плательщиков, "
-                 f"веера {th['out_deg_distributor']['value']} получателей)")
+                 f"на {int(f.out_deg)}, пропуск {_pt(f.pass_through)} — смешанный профиль: "
+                 f"плательщиков меньше {th['in_deg_consolidator']['value']}, получателей "
+                 f"меньше {th['out_deg_distributor']['value']}, пропуск вне зон "
+                 f"транзита и осаждения")
     return s[:200]

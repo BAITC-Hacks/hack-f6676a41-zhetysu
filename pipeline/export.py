@@ -92,7 +92,8 @@ def write_csv(nodes: pd.DataFrame, clusters: pd.DataFrame,
 
     t = top.copy()
     t["gid"] = t.gid.astype("int64")
-    t[["rank", "gid", "role", "priority_score", "why"]].to_csv(
+    t[["rank", "gid", "role", "priority_score", "why",
+       "cluster_id", "role_score", "rule_id"]].to_csv(
         out_dir / "top_nodes.csv", index=False)
 
 

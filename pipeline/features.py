@@ -37,8 +37,11 @@ def structural(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
     df["pagerank"] = df.gid.map(nx.pagerank(G, weight="sum_kzt")).fillna(0.0)
     # HITS: authority — «сборщик», hub — «источник рассылки»
     hubs, auth = nx.hits(G, max_iter=1000, normalized=True)
-    df["hub"] = df.gid.map(hubs).fillna(0.0)
-    df["authority"] = df.gid.map(auth).fillna(0.0)
+    # hub/authority неотрицательны по определению; у мелких значений остаётся
+    # численный шум порядка 1e-19, из-за которого два прогона давали разные
+    # байты в выгрузке — отсекаем, чтобы результат был строго воспроизводим
+    df["hub"] = df.gid.map(hubs).fillna(0.0).clip(lower=0.0).round(10)
+    df["authority"] = df.gid.map(auth).fillna(0.0).clip(lower=0.0).round(10)
     # Посредничество: сколько кратчайших путей движения денег идёт через узел.
     # Считаем на ненагруженном направленном графе — интерпретация «сколько
     # цепочек проходит через узел», а не «сколько тенге».

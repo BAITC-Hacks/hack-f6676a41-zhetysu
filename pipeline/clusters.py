@@ -101,16 +101,15 @@ def _hypothesis(row: dict, g: pd.DataFrame) -> str:
         parts.append("нижних звеньев дела в кластере нет — участок ниже по потоку")
 
     if row["n_coordinator"]:
-        parts.append(f"{row['n_coordinator']} узел(ов) над точками сбора — "
-                     f"кандидаты в распорядители")
+        parts.append(f"кандидатов над точками сбора: {row['n_coordinator']}")
     if row["n_consolidator"]:
-        parts.append(f"{row['n_consolidator']} точк(и) консолидации")
+        parts.append(f"точек консолидации: {row['n_consolidator']}")
     if row["n_distributor"]:
-        parts.append(f"{row['n_distributor']} веерных рассылок")
+        parts.append(f"веерных рассылок: {row['n_distributor']}")
     if row["n_transit"]:
-        parts.append(f"{row['n_transit']} транзитных счетов")
+        parts.append(f"транзитных счетов: {row['n_transit']}")
     if row["n_terminal"]:
-        parts.append(f"{row['n_terminal']} узлов, где деньги остались")
+        parts.append(f"узлов, где деньги остались: {row['n_terminal']}")
 
     tail = (f"внутренний оборот {_m(row['sum_kzt_internal'])} KZT, "
             f"наружу уходит {_m(row['kzt_out_of_cluster'])} KZT")
