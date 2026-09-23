@@ -88,20 +88,6 @@ def health():
 if OUT.exists():
     app.mount("/out", StaticFiles(directory=OUT), name="out")
 
-# Варианты интерфейса на время выбора: каждый в своей папке, по своей ссылке.
-# В репозиторий не попадают; после выбора победитель переезжает в web/.
-_VARIANTS = ROOT / "web-variants"
-if _VARIANTS.exists():
-    from fastapi.responses import RedirectResponse
-
-    for _v in sorted(p for p in _VARIANTS.iterdir() if p.is_dir()):
-        app.mount(f"/v/{_v.name}", StaticFiles(directory=_v, html=True), name=f"v-{_v.name}")
-
-    @app.get("/v/{name}")
-    def _variant_slash(name: str):
-        # без завершающего слэша статика отдаёт 404 — уводим на канонический адрес
-        return RedirectResponse(f"/v/{name}/")
-
 if WEB.exists() and (WEB / "index.html").exists():
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
 else:
