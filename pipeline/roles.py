@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
+from . import patterns
 
 
 # ------------------------------------------------------------------ пороги
@@ -236,7 +237,8 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
 
     # --- обоснования --------------------------------------------------------
     out["evidence"] = [
-        _evidence(df.loc[i], out.loc[i], th) for i in df.index
+        _with_pattern(_evidence(df.loc[i], out.loc[i], th), df.loc[i])
+        for i in df.index
     ]
     out["role_score"] = out.role_score.astype(float).round(3)
     return out
@@ -285,6 +287,25 @@ def _coordinator_pass(df: pd.DataFrame, out: pd.DataFrame, th: dict) -> pd.DataF
 
 # ------------------------------------------------------------------ evidence
 
+LIMIT = 200
+
+
+def _with_pattern(base: str, f: pd.Series) -> str:
+    """Приписывает временной признак, урезая основной текст, а не признак.
+
+    Лимит ТЗ — 200 символов. Наивное `text[:200]` выбрасывало бы именно
+    приписку, потому что она в конце, поэтому место под неё освобождается
+    заранее.
+    """
+    note = patterns.note(f)
+    if not note:
+        return base[:LIMIT]
+    tail = " | " + note
+    if len(tail) >= LIMIT:
+        return tail[3:LIMIT]
+    return base[:LIMIT - len(tail)].rstrip(" ,;") + tail
+
+
 def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
     """Человекочитаемое обоснование с числами, до 200 символов."""
     role = r.role
@@ -322,9 +343,12 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
                  f"от {int(f.in_deg)}, выход {_m(f.out_kzt)} KZT на {int(f.out_deg)}{hold_s}")
     elif role == "terminal":
         if f.terminal_status == "observed_sink":
+            mat = th["materiality_kzt"]["value"]
+            size = ("" if f.in_kzt >= mat else
+                    f"; сумма ниже медианы графа {_m(mat)} KZT — мелкий получатель")
             s = (f"получил {_m(f.in_kzt)} KZT, переводов {int(f.in_tx)}, плательщиков "
                  f"{int(f.in_deg)}{seed_note}; исходящих переводов 0, и они проверены "
-                 f"обходом на колене {int(f.depth)}")
+                 f"обходом на колене {int(f.depth)}{size}")
         elif f.terminal_status == "unknown_truncated":
             s = (f"получил {_m(f.in_kzt)} KZT от {int(f.in_deg)}; обход обрезан 4-м коленом, "
                  f"вероятность что конечный {f.terminal_p:.2f} по модели на коленах 1-3")

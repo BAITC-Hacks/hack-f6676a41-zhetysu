@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import (censoring, clusters, config, data, export, features, graphbuild,
-               priority, roles)
+               patterns, priority, robustness, roles)
 
 
 def log(msg: str) -> None:
@@ -51,8 +51,17 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"cv5 {cens_report['обучение']['auc_cv5']}, "
         f"колено 3 (out-of-depth) {cens_report['валидация_по_коленам']['auc']}")
 
-    log("[5/7] роли по формальным правилам с порогами из распределений")
+    log("[5/8] временные паттерны: сквозной транзит, синхронный сбор, дробление")
+    pth = patterns.thresholds(feats)
+    flags = patterns.flags(feats, pth)
+    feats = feats.merge(flags, on="gid", how="left")
+    log("      " + ", ".join(
+        f"{k}={int(feats[k].sum())}" for k in
+        ("flag_fast_transit", "flag_sync_collection", "flag_structuring")))
+
+    log("[6/8] роли по формальным правилам с порогами из распределений")
     th = roles.thresholds(feats)
+    th.update(pth)
     role_tab = roles.assign(feats, th)
     nodes = feats.merge(role_tab, on="gid", how="left")
     log("      пороги: " + ", ".join(
@@ -60,7 +69,7 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     log("      роли: " + ", ".join(
         f"{k}={v}" for k, v in nodes.role.value_counts().items()))
 
-    log("[6/7] кластеры (Louvain на неориентированной проекции) и приоритеты")
+    log("[7/8] кластеры (Louvain на неориентированной проекции) и приоритеты")
     nodes["cluster_id"] = clusters.detect(UG, nodes)
     prio = priority.compute(nodes)
     nodes = nodes.merge(prio, on="gid", how="left")
@@ -70,15 +79,21 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"крупнейший: {int(cl_tab.n_nodes.max())} узлов, "
         f"кластеров с 2+ seed: {int((cl_tab.n_seed >= 2).sum())}")
 
-    log("[7/7] выгрузки")
+    log("[8/8] устойчивость сети: изъятие топ-N против случайного, и выгрузки")
+    rob = robustness.curves(nodes, ds.edges)
+    at20 = rob["summary"]["at_20"]
+    log(f"      изъятие 20 узлов: крупнейшая компонента {at20['targeted_lcc_share']:.2f} "
+        f"против {at20['random_lcc_share']:.2f} при случайном выборе "
+        f"(в {at20['lcc_ratio']} раза), отрезано оборота "
+        f"{at20['targeted_cut_kzt_share']:.1%} против {at20['random_cut_kzt_share']:.1%}")
     elapsed = round(time.perf_counter() - t0, 2)
     export.write_csv(nodes, cl_tab, top, out_dir)
     export.write_graph_json(
         nodes, ds.edges, cl_tab, top,
         {"period": ds.period, "thresholds": th, "censoring": _cens_brief(cens_report),
-         "pipeline_seconds": elapsed},
+         "robustness": rob, "pipeline_seconds": elapsed},
         out_dir)
-    export.write_method_artifacts(th, cens_report, out_dir)
+    export.write_method_artifacts(th, cens_report, rob, out_dir)
 
     checks = verify(nodes, cl_tab, top, out_dir, stats)
     log(f"      готово за {elapsed} с → {out_dir}/nodes_roles.csv, clusters.csv, "

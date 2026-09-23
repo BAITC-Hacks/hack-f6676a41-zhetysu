@@ -33,7 +33,9 @@ NODES_CSV_COLUMNS = [
     "in_tx", "out_tx", "pagerank", "betweenness", "hub", "authority",
     "pass_through", "retained_kzt", "unseen_inflow_kzt", "n_seed_payers",
     "truncated_by_depth", "terminal_status", "terminal_p",
-    "hold_days_median", "max_same_day_payers", "downstream_nodes",
+    "hold_days_median", "fast_out_share", "max_same_day_payers",
+    "max_same_day_one_payer_tx", "flag_fast_transit", "flag_sync_collection",
+    "flag_structuring", "timing_score", "downstream_nodes",
     "component_size", "is_articulation",
 ]
 
@@ -50,8 +52,9 @@ GRAPH_NODE_FIELDS = [
     # наши дополнения
     "rule_id", "terminal_status", "terminal_p", "betweenness", "hub", "authority",
     "retained_kzt", "unseen_inflow_kzt", "n_seed_payers", "hold_days_median",
-    "max_same_day_payers", "downstream_nodes", "component_size", "is_articulation",
-    "why",
+    "fast_out_share", "max_same_day_payers", "max_same_day_one_payer_tx",
+    "flag_fast_transit", "flag_sync_collection", "flag_structuring", "timing_score",
+    "downstream_nodes", "component_size", "is_articulation", "why",
 ]
 
 
@@ -140,6 +143,20 @@ def write_graph_json(nodes: pd.DataFrame, edges: pd.DataFrame,
                             nodes.role.value_counts().items()},
             "terminal_status_counts": {k: int(v) for k, v in
                                        nodes.terminal_status.value_counts().items()},
+            # разбивка роли terminal по правилам: сколько подтверждено наблюдением,
+            # сколько по осаждению суммы и сколько оценено вероятностью
+            "terminal_breakdown": _terminal_breakdown(nodes, meta_extra["thresholds"]),
+            "pattern_counts": {
+                "flag_fast_transit": int(nodes.flag_fast_transit.sum()),
+                "flag_sync_collection": int(nodes.flag_sync_collection.sum()),
+                "flag_structuring": int(nodes.flag_structuring.sum()),
+                "любой_признак": int((nodes.flag_fast_transit |
+                                      nodes.flag_sync_collection |
+                                      nodes.flag_structuring).sum()),
+            },
+            "rule_counts": {k: int(v) for k, v in
+                            nodes.rule_id.str.split(":").str[0].value_counts().items()},
+            "robustness": meta_extra["robustness"],
             "method": {
                 "thresholds": meta_extra["thresholds"],
                 "priority_weights": C.PRIORITY_WEIGHTS,

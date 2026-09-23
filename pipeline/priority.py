@@ -4,12 +4,14 @@ priority_score = взвешенная сумма шести компонент, 
 нормировка на максимум по графу. Компоненты — перцентили наблюдаемых
 величин, поэтому скор не зависит от абсолютного масштаба выгрузки.
 
-    money             0.28  перцентиль max(in_kzt, out_kzt)
-    in_concentration  0.20  перцентиль in_deg — сколько плательщиков сходится
-    structure         0.16  среднее перцентилей betweenness и pagerank
-    seed_link         0.14  прямая связь с известными следствию клиентами
-    retention         0.10  перцентиль осевшей суммы
+    money             0.25  перцентиль max(in_kzt, out_kzt)
+    in_concentration  0.18  перцентиль in_deg — сколько плательщиков сходится
+    structure         0.14  среднее перцентилей betweenness и pagerank
+    seed_link         0.12  прямая связь с известными следствию клиентами
+    retention         0.09  перцентиль осевшей суммы
     role              0.12  вес роли в иерархии группы × уверенность в роли
+    timing            0.10  временные паттерны (см. patterns.py): сквозной транзит,
+                            синхронный сбор в один день, дробление сумм
 
 Отдельное решение: 81 seed-клиент следствию УЖЕ известен, инструмент нужен,
 чтобы показать невидимую часть сети (ТЗ: «фокус проверки смещается с 81
@@ -24,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
+from . import patterns
 from .roles import _m, _pt
 
 KNOWN_SEED_DISCOUNT = 0.5
@@ -35,6 +38,7 @@ COMPONENT_LABELS = {
     "seed_link": "связь с известными клиентами",
     "retention": "осевшая сумма",
     "role": "роль в структуре",
+    "timing": "поведение во времени",
 }
 
 
@@ -49,6 +53,7 @@ def compute(df: pd.DataFrame) -> pd.DataFrame:
     comp["retention"] = df.retained_kzt.rank(pct=True)
     comp["role"] = (df.role.map(C.ROLE_PRIORITY_WEIGHT).fillna(0.05) *
                     (0.5 + 0.5 * df.role_score))
+    comp["timing"] = df.timing_score.fillna(0.0)
 
     raw = sum(C.PRIORITY_WEIGHTS[k] * comp[k] for k in C.PRIORITY_WEIGHTS)
     raw = raw * np.where(df.is_seed, KNOWN_SEED_DISCOUNT, 1.0)
@@ -85,6 +90,9 @@ def _why(f: pd.Series, c: pd.Series, s: float) -> str:
         facts.append(f"{_m(f.unseen_inflow_kzt)} KZT пришло вне выборки")
     if f.terminal_status == "unknown_truncated":
         facts.append(f"обход обрезан, P(конечный)={f.terminal_p:.2f}")
+    tnote = patterns.note(f)
+    if tnote:
+        facts.append(tnote)
     if f.is_seed:
         facts.append("seed — следствию уже известен, приоритет снижен вдвое")
 
