@@ -115,12 +115,9 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     role = pd.Series("peripheral", index=df.index, dtype=object)
     score = pd.Series(0.5, index=df.index, dtype=float)
     rule = pd.Series("R5.peripheral", index=df.index, dtype=object)
-    ev = pd.Series("", index=df.index, dtype=object)
 
     pt = df.pass_through
     fast = df.get("fast_out_share", pd.Series(np.nan, index=df.index)).fillna(0.0)
-    hold = df.get("hold_days_median", pd.Series(np.nan, index=df.index))
-    is_seed = df.is_seed.to_numpy()
 
     # --- 0. узлы без рёбер ---------------------------------------------------
     no_edges = (df.in_deg == 0) & (df.out_deg == 0)
@@ -166,7 +163,8 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
     score[m_dist] = np.clip(0.5 * df.loc[m_dist, "out_deg"] / T_OUT, 0.5, 1.0)
 
     role[m_cons] = "consolidator"
-    rule[m_cons] = f"R2.consolidator: in_deg >= {T_IN} и out_deg <= max(2, in_deg/2)"
+    rule[m_cons] = (f"R2.consolidator: in_deg >= {T_IN} и (out_deg <= max(2, in_deg/2) "
+                    f"или pass_through <= {C.CONSOLIDATOR_MAX_PT})")
     base = np.clip(0.5 * df.loc[m_cons, "in_deg"] / T_IN, 0.5, 1.0)
     keeps = (df.loc[m_cons, "pass_through"].fillna(0.0) <= 0.2)
     score[m_cons] = np.minimum(1.0, base + 0.1 * keeps)
@@ -183,7 +181,7 @@ def assign(df: pd.DataFrame, th: dict) -> pd.DataFrame:
          f"R3b.transit: pass_through > {C.TRANSIT_PT_HIGH} — отдал больше, чем получил "
          f"по данным, приток извне выборки"],
         default=f"R3d.transit: >=60% исходящих в пределах {C.FAST_TRANSIT_DAYS} суток "
-                f"после поступления")
+                f"после поступления и pass_through >= 0.6")
     tr_score = np.select(
         [df.loc[m_trans, "is_seed"].to_numpy(),
          tr_pt.between(C.TRANSIT_PT_LOW, C.TRANSIT_PT_HIGH).to_numpy(),

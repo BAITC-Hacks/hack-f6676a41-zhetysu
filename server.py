@@ -11,6 +11,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -20,6 +21,21 @@ from fastapi.staticfiles import StaticFiles
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 OUT = ROOT / "out"
+
+
+
+def _load_env(path: Path) -> None:
+    """Необязательный .env рядом с сервером: KEY=VALUE, без внешних библиотек."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_env(ROOT / ".env")
 
 app = FastAPI(title="Граф денег", docs_url=None, redoc_url=None)
 

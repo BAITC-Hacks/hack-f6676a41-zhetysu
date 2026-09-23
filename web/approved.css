@@ -56,3 +56,4 @@
 @media(max-width:700px){.shell{scrollbar-gutter:auto}}
 .graph-focus-action{margin-left:12px;font-size:11px;gap:5px}.graph-focus-action .icon{width:13px;height:13px}.graph-controls .icon-button:disabled{opacity:.35}.graph-controls .zoom-text{min-width:42px;width:auto}
 @media(max-width:700px){.graph-focus-action{display:flex;margin:7px 0 0}.graph-controls .zoom-text{min-width:36px}}
+.graph-key-signal.seed-signal{position:relative}.graph-key-signal.seed-signal:after{content:"";position:absolute;width:4px;height:4px;background:var(--green);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%)}

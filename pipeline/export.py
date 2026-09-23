@@ -35,8 +35,8 @@ NODES_CSV_COLUMNS = [
     "truncated_by_depth", "terminal_status", "terminal_p",
     "hold_days_median", "fast_out_share", "max_same_day_payers",
     "max_same_day_one_payer_tx", "flag_fast_transit", "flag_sync_collection",
-    "flag_structuring", "timing_score", "downstream_nodes",
-    "component_size", "is_articulation", "x", "y",
+    "flag_structuring", "timing_score", "mutual_pair", "in_cycle",
+    "downstream_nodes", "component_size", "is_articulation", "x", "y",
 ]
 
 CLUSTERS_CSV_COLUMNS = [
@@ -56,7 +56,7 @@ GRAPH_NODE_FIELDS = [
     "retained_kzt", "unseen_inflow_kzt", "n_seed_payers", "hold_days_median",
     "fast_out_share", "max_same_day_payers", "max_same_day_one_payer_tx",
     "flag_fast_transit", "flag_sync_collection", "flag_structuring", "timing_score",
-    "downstream_nodes", "component_size", "is_articulation", "why",
+    "mutual_pair", "in_cycle", "downstream_nodes", "component_size", "is_articulation", "why",
     "x", "y",
 ]
 
@@ -198,6 +198,8 @@ def write_graph_json(nodes: pd.DataFrame, edges: pd.DataFrame,
                 "flag_fast_transit": int(nodes.flag_fast_transit.sum()),
                 "flag_sync_collection": int(nodes.flag_sync_collection.sum()),
                 "flag_structuring": int(nodes.flag_structuring.sum()),
+                "mutual_pair": int(nodes.mutual_pair.sum()),
+                "in_cycle": int(nodes.in_cycle.sum()),
                 "любой_признак": int((nodes.flag_fast_transit |
                                       nodes.flag_sync_collection |
                                       nodes.flag_structuring).sum()),

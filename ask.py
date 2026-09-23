@@ -186,14 +186,25 @@ def answer(g: Graph, q: str) -> dict[str, Any]:
                 "nodes": [gid for c in cl for gid in c["top_gids"][:2]],
                 "source": "выгрузка кластеров"}
 
-    # 6. Не поняли — честно говорим и подсказываем
+    # 6. Не поняли — честно говорим и подсказываем на примерах из этого же графа
+    first = g.top[0]["gid"] if g.top else next(iter(g.nodes), "")
+    pair = example_payers(g)
+    collect = f"«кто собирает деньги с {pair[0]} и {pair[1]}», " if pair else ""
     return {
         "text": ("Не понял вопрос. Спросите, например: «кого смотреть первым», "
-                 "«кто собирает деньги с 100000000343175100 и 100000000456947100», "
-                 "«куда уходят деньги от 100000003115284100», «покажи координаторов», "
+                 f"{collect}«куда уходят деньги от {first}», «покажи координаторов», "
                  "«какие есть кластеры»."),
         "nodes": [], "source": None,
     }
+
+
+def example_payers(g: Graph) -> tuple[str, str] | None:
+    """Два плательщика с общим получателем — пример, на который есть ответ."""
+    for item in g.top:
+        payers = [e["src"] for e in g.senders(item["gid"])]
+        if len(payers) >= 2:
+            return payers[0], payers[1]
+    return None
 
 
 # ─────────────────────────────────────────────── необязательная формулировка

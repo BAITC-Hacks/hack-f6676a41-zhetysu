@@ -107,7 +107,7 @@ def note(f: pd.Series) -> str:
         bits.append(f"{n_payers_nom(f.max_same_day_payers)} в один день")
     if f.get("flag_fast_transit"):
         bits.append(f"сквозной транзит за {n_days(f.get('hold_days_median'))} "
-                    f"({100 * f.fast_out_share:.0f}% суммы)")
+                    f"({100 * f.fast_out_share:.0f}% исходящих)")
     if f.get("flag_structuring"):
         if f.max_same_day_one_payer_tx >= 3:
             bits.append(f"дробление: {n_tx(f.max_same_day_one_payer_tx)} "
