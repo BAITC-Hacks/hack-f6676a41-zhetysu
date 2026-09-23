@@ -36,7 +36,8 @@ import pandas as pd
 
 from . import config as C
 from . import patterns
-from .fmt import money as _m, pct as _pt, n_tx, n_payers, n_receivers
+from .fmt import (money as _m, pct as _pt, n_tx, n_payers, n_payers_nom,
+                  n_receivers)
 
 
 # ------------------------------------------------------------------ пороги
@@ -306,6 +307,7 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
     """Человекочитаемое обоснование с числами, до 200 символов."""
     role = r.role
     seed_note = f", из них seed: {int(f.n_seed_payers)}" if f.n_seed_payers else ""
+    seed_paren = f" (seed: {int(f.n_seed_payers)})" if f.n_seed_payers else ""
 
     if role == "coordinator":
         s = (f"получает {_m(f.in_kzt)} KZT (топ-5% графа) от "
@@ -313,7 +315,7 @@ def _evidence(f: pd.Series, r: pd.Series, th: dict) -> str:
              f"сами собирают от {th['in_deg_consolidator']['value']}+ плательщиков; "
              f"отдаёт дальше {_pt(f.pass_through)}")
     elif role == "consolidator":
-        s = (f"сходятся {n_payers(f.in_deg)}{seed_note} на {n_receivers(f.out_deg)}; "
+        s = (f"сходятся {n_payers_nom(f.in_deg)}{seed_paren} на {n_receivers(f.out_deg)}; "
              f"получено {_m(f.in_kzt)} KZT, отдано дальше {_pt(f.pass_through)}, "
              f"осело {_m(f.retained_kzt)} KZT")
     elif role == "distributor":

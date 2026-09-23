@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
-from .fmt import n_days, n_inflows, n_payers, n_tx
+from .fmt import n_days, n_inflows, n_payers_nom, n_tx
 
 
 def thresholds(df: pd.DataFrame) -> dict:
@@ -104,7 +104,7 @@ def note(f: pd.Series) -> str:
     """Короткая приписка к evidence — только по сработавшим признакам."""
     bits = []
     if f.get("flag_sync_collection"):
-        bits.append(f"{n_payers(f.max_same_day_payers)} в один день")
+        bits.append(f"{n_payers_nom(f.max_same_day_payers)} в один день")
     if f.get("flag_fast_transit"):
         bits.append(f"сквозной транзит за {n_days(f.get('hold_days_median'))} "
                     f"({100 * f.fast_out_share:.0f}% суммы)")

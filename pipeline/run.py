@@ -26,7 +26,7 @@ def log(msg: str) -> None:
 def build_all(data_dir: Path, out_dir: Path) -> dict:
     t0 = time.perf_counter()
 
-    log("[1/7] загрузка данных")
+    log("[1/8] загрузка данных")
     ds = data.load(data_dir)
     stats = data.sanity(ds)
     log(f"      узлов {stats['n_nodes']}, рёбер {stats['n_edges']}, "
@@ -35,13 +35,13 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
     log(f"      узлов без рёбер: {stats['n_no_edges']} "
         f"(seed среди них: {stats['n_no_edges_seed']})")
 
-    log("[2/7] сборка направленного взвешенного графа")
+    log("[2/8] сборка направленного взвешенного графа")
     G, UG = graphbuild.build(ds)
 
-    log("[3/7] метрики узлов (структура, деньги, время)")
+    log("[3/8] метрики узлов (структура, деньги, время)")
     feats = features.build(G, ds)
 
-    log("[4/7] модель обрыва обхода: настоящие конечные vs обрезанные 4-м коленом")
+    log("[4/8] модель обрыва обхода: настоящие конечные vs обрезанные 4-м коленом")
     cens, cens_report = censoring.estimate(feats)
     feats = feats.merge(cens, on="gid", how="left")
     log(f"      обрезано обходом: {cens_report['обрезанных_узлов']}, "
