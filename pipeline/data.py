@@ -21,7 +21,28 @@ class Dataset:
         return set(self.nodes.loc[self.nodes.is_seed, "gid"])
 
 
+class DataError(Exception):
+    """Данные не найдены или неполны — сообщаем это словами, а не трейсбеком."""
+
+
+REQUIRED_FILES = ("edges.parquet", "nodes.parquet", "transactions.parquet")
+
+
+def check_files(data_dir: Path) -> None:
+    if not data_dir.is_dir():
+        raise DataError(
+            f"папка с данными не найдена: {data_dir}\n"
+            f"      укажите путь к выгрузке организаторов, например: "
+            f"--data case/data")
+    missing = [f for f in REQUIRED_FILES if not (data_dir / f).is_file()]
+    if missing:
+        raise DataError(
+            f"в папке {data_dir} не хватает файлов: {', '.join(missing)}\n"
+            f"      ожидаются все три: {', '.join(REQUIRED_FILES)}")
+
+
 def load(data_dir: Path) -> Dataset:
+    check_files(data_dir)
     edges = pd.read_parquet(data_dir / "edges.parquet")
     nodes = pd.read_parquet(data_dir / "nodes.parquet")
     tx = pd.read_parquet(data_dir / "transactions.parquet")

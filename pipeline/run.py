@@ -156,7 +156,11 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="out", help="куда писать выгрузки")
     a = ap.parse_args(argv)
 
-    res = build_all(Path(a.data), Path(a.out))
+    try:
+        res = build_all(Path(a.data), Path(a.out))
+    except data.DataError as e:
+        log(f"ОШИБКА: {e}")
+        return 2
     if not all(res["checks"].values()):
         return 1
     if res["elapsed"] > 300:

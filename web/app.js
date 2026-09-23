@@ -1,91 +1,131 @@
 'use strict';
-const $=id=>document.getElementById(id), esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const colors={consolidator:'#d98618',transit:'#2587c8',distributor:'#9a62cc',terminal:'#d15a70',coordinator:'#13987c',peripheral:'#8796a8'};
-const fmt=n=>Number.isFinite(Number(n))?Number(n).toLocaleString('ru-RU',{maximumFractionDigits:0}):'—', money=n=>fmt(n)+' ₸', pct=n=>n==null?'нет входящих':(Number(n)*100).toLocaleString('ru-RU',{maximumFractionDigits:1})+'%';
-let data,byId=new Map(),adj=new Map(),points=new Map(),globalPoints=new Map(),visible=[],links=[],selected=null,scale=1,ox=0,oy=0,raf=0,W=1,H=1;
-let simulation=null, removalCount=0, simulationFrame=0, firstGraphFrame=false;
-const isRemoved=id=>simulation && (simulation.removedRank.get(String(id))||Infinity)<=removalCount;
-const canvas=$('canvas'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const numberFormat=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0});
+const fmt=n=>n!=null&&Number.isFinite(Number(n))?numberFormat.format(Number(n)):'—';
+const money=n=>fmt(n)+' ₸';
+const pct=n=>n==null?'Не рассчитано':(Number(n)*100).toLocaleString('ru-RU',{maximumFractionDigits:1})+'%';
+let data=null,byId=new Map(),adj=new Map(),selected=null,simulation=null,removalCount=0,currentTab='network',fingerprint='',loading=false,simulationFrame=0;
+let restoring=false;
+let decisions={};try{const saved=JSON.parse(localStorage.getItem('money-review')||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved))decisions=saved}catch(_){}
+try{document.body.classList.toggle('dark',localStorage.getItem('money-theme')==='dark')}catch(_){}
+const graph=new MoneyGraph($('canvas'),$('flow-canvas'),selectNode);
 function msg(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error)}
-// The shared contract guarantees string identifiers; reject legacy numeric IDs
-// during validation instead of repairing already-rounded numbers.
-function parseExact(text){return JSON.parse(text)}
-function role(r){return data.roles?.[r]?.label||r||'Роль не определена'}
-function color(r){return colors[r]||'#8796a8'}
-function tab(name){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==name);document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===name));if(name==='network')requestAnimationFrame(resize)}
-function layout(){points.clear();const groups=new Map();for(const n of data.nodes){let k=String(n.cluster_id);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(n)}
- const sorted=[...groups].sort((a,b)=>b[1].length-a[1].length);const width=Math.max(900,Math.sqrt(data.nodes.length)*55);let x=0,y=0,rowH=0;
- for(const [id,nodes] of sorted){nodes.sort((a,b)=>b.priority_score-a.priority_score||String(a.gid).localeCompare(String(b.gid)));const r=Math.max(55,Math.sqrt(nodes.length)*17),size=2*r+65;if(x+size>width&&x){x=0;y+=rowH;rowH=0}const cx=x+r+30,cy=y+r+30;nodes.forEach((n,i)=>{const angle=i*2.399963229728653,rr=i===0?0:Math.sqrt(i/nodes.length)*r;points.set(String(n.gid),{x:cx+Math.cos(angle)*rr,y:cy+Math.sin(angle)*rr,n})});x+=size;rowH=Math.max(rowH,size)}
+function role(key){return data?.roles?.[key]?.label||key||'Не определена'}
+function color(key){return 'var(--'+({coordinator:1,consolidator:1,distributor:1,transit:1,terminal:1,peripheral:1}[key]?key:'peripheral')+')'}
+function isRemoved(id){return !!simulation&&(simulation.removedRank.get(id)||Infinity)<=removalCount}
+function savePosition(replace=false){
+ if(restoring||!data)return;
+ const u=new URL(location.href);u.searchParams.set('view',currentTab);
+ if(selected)u.searchParams.set('gid',selected);else u.searchParams.delete('gid');
+ if(removalCount)u.searchParams.set('remove',String(removalCount));else u.searchParams.delete('remove');
+ if($('cluster').value)u.searchParams.set('cluster',$('cluster').value);else u.searchParams.delete('cluster');
+ if(u.href!==location.href)history[replace?'replaceState':'pushState']({},'',u);
 }
-function filter(){points=globalPoints;const c=$('cluster').value;visible=data.nodes.filter(n=>!c||String(n.cluster_id)===c).map(n=>points.get(String(n.gid)));const ids=new Set(visible.map(p=>String(p.n.gid)));links=data.edges.filter(e=>ids.has(String(e.src))&&ids.has(String(e.dst)));$('graph-title').textContent=c?'Кластер '+c:'Сеть переводов';$('visible-count').textContent=fmt(visible.length)+' клиентов · '+fmt(links.length)+' связей';fit()}
-function resize(){const r=canvas.getBoundingClientRect();if(!r.width||!r.height)return;W=r.width;H=r.height;const d=Math.min(devicePixelRatio||1,2);canvas.width=W*d;canvas.height=H*d;ctx.setTransform(d,0,0,d,0,0);draw()}
-function fit(){if(!visible.length){draw();return}const xs=visible.map(p=>p.x),ys=visible.map(p=>p.y);const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);scale=Math.min((W-100)/Math.max(100,maxX-minX),(H-180)/Math.max(100,maxY-minY),2);scale=Math.max(scale,.015);ox=W/2-(minX+maxX)/2*scale;oy=(H-55)/2-(minY+maxY)/2*scale;draw()}
-function draw(){if(raf)return;raf=requestAnimationFrame(paint)}
-function paint(){raf=0;ctx.clearRect(0,0,W,H);if(!data)return;const css=getComputedStyle(document.body),edgeColor=css.getPropertyValue('--edge').trim(),textColor=css.getPropertyValue('--text').trim();const near=new Set(selected?[selected,...(adj.get(selected)||[]).map(e=>String(e.src)===selected?String(e.dst):String(e.src))]:[]);
- const screen=p=>({x:p.x*scale+ox,y:p.y*scale+oy});
- function line(e,active){if(isRemoved(e.src)||isRemoved(e.dst))return;const a=screen(points.get(String(e.src))),b=screen(points.get(String(e.dst)));if((a.x<0&&b.x<0)||(a.y<0&&b.y<0)||(a.x>W&&b.x>W)||(a.y>H&&b.y>H))return;const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);ctx.globalAlpha=selected&&!active?.09:active?.95:.36;ctx.strokeStyle=active?css.getPropertyValue('--accent').trim():edgeColor;ctx.lineWidth=active?1.7:.65;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();if(len>10){const rr=radius(points.get(String(e.dst)).n)+2,ux=dx/len,uy=dy/len,tx=b.x-ux*rr,ty=b.y-uy*rr,s=active?7:4;ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx-ux*s-uy*s*.45,ty-uy*s+ux*s*.45);ctx.lineTo(tx-ux*s+uy*s*.45,ty-uy*s-ux*s*.45);ctx.fill()}}
- if(!firstGraphFrame)for(const e of links)if(!selected||(String(e.src)!==selected&&String(e.dst)!==selected))line(e,false);if(selected)for(const e of adj.get(selected)||[])if(links.includes(e))line(e,true);
- for(const p of visible){const q=screen(p),id=String(p.n.gid),r=radius(p.n);if(q.x< -20||q.x>W+20||q.y< -20||q.y>H+20)continue;ctx.globalAlpha=isRemoved(id)?.12:selected&&!near.has(id)?.18:1;ctx.fillStyle=isRemoved(id)?edgeColor:color(p.n.role);ctx.beginPath();ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();if(p.n.is_seed||id===selected){ctx.strokeStyle=id===selected?textColor:color(p.n.role);ctx.lineWidth=id===selected?2.5:1;ctx.beginPath();ctx.arc(q.x,q.y,r+3,0,Math.PI*2);ctx.stroke()}if(id===selected||scale>1.7&&near.has(id)){ctx.font='11px system-ui';ctx.fillStyle=textColor;ctx.fillText(id,q.x+r+5,q.y+4)}}ctx.globalAlpha=1;if(firstGraphFrame){firstGraphFrame=false;draw()}
+function tab(name,persist=true){
+ if(!['network','top','clusters','terminal','ask'].includes(name))name='network';
+ currentTab=name;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==name);
+ document.querySelectorAll('[data-tab]').forEach(el=>{el.classList.toggle('active',el.dataset.tab===name);el.setAttribute('aria-current',el.dataset.tab===name?'page':'false')});
+ document.body.classList.toggle('document-mode',name!=='network');
+ if(name==='network')requestAnimationFrame(()=>{graph.resize();graph.request()});
+ if(persist)savePosition();
 }
-function radius(n){return Math.max(2,Math.min(12,(3+8*Math.max(0,Math.min(1,Number(n.priority_score)||0)))*Math.sqrt(scale)))}
-function selectNode(id){id=String(id);const n=byId.get(id);if(!n){msg('Клиент с gid '+id+' не найден. Проверьте полный номер.',true);return}selected=id;$('neighbors').disabled=false;if(points!==globalPoints){points=globalPoints;filter()}if($('cluster').value){$('cluster').value='';filter()}tab('network');const p=points.get(id);scale=Math.max(scale,1.5);ox=W/2-p.x*scale;oy=H/2-p.y*scale;$('gid').value=id;msg('Выбран gid '+id+' · связи подсвечены');dossier(n);draw()}
-function dossier(n){const id=String(n.gid),edges=adj.get(id)||[];const facts=[['Получил',money(n.in_kzt)],['Отдал',money(n.out_kzt)],['Плательщиков',fmt(n.in_deg)],['Получателей',fmt(n.out_deg)],['Входящих переводов',fmt(n.in_tx)],['Исходящих переводов',fmt(n.out_tx)],['Доля пропуска',pct(n.pass_through)],['Колено',n.depth],['Seed · исходный клиент',n.is_seed?'Да':'Нет'],['Кластер',n.cluster_id],['Приоритет',pct(n.priority_score)],['Уверенность роли',pct(n.role_score)],['Сценарий изъятия',isRemoved(id)?'Узел изъят':'Узел активен'],['Наблюдение',terminalStatuses[n.terminal_status]?.label||'Не рассчитано'],['Вероятность стока · модель',n.terminal_status==='unknown_truncated'&&n.terminal_p!=null?pct(n.terminal_p):'Не применяется']];
- $('dossier').innerHTML='<h2>Клиент '+esc(id)+'</h2><span class="badge">'+esc(role(n.role))+'</span><div class="evidence">'+esc(n.evidence||'Обоснование отсутствует')+'</div><div class="facts">'+facts.map(([k,v])=>'<div><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></div>').join('')+'</div>'+(n.truncated_by_depth?'<p class="note">Обрыв наблюдения на границе глубины. Отсутствие исходящих не доказывает удержание денег.</p>':'')+(n.is_seed||n.pass_through>1?'<p class="note">Внешние входящие не видны: доля пропуска не отражает полный баланс клиента.</p>':'')+'<h3>Связи · '+edges.length+'</h3><p style="font-size:12px;color:var(--muted)">Суммы по выборке; стрелка показывает направление денег.</p>'+ (edges.length?[...edges].sort((a,b)=>b.sum_kzt-a.sum_kzt).map(e=>{const incoming=String(e.dst)===id,other=incoming?String(e.src):String(e.dst);return '<button class="neighbor" data-gid="'+esc(other)+'">'+(incoming?'← От ':'→ К ')+esc(other)+'<span>'+money(e.sum_kzt)+' · '+fmt(e.n_tx)+' переводов</span></button>'}).join(''):'<p>Связей в предоставленной выборке нет.</p>');
+function selectNode(id,persist=true){
+ if(typeof id!=='string'||!byId.has(id)){msg('Клиент с gid '+id+' не найден. Проверьте полный номер.',true);return}
+ selected=id;$('cluster').value='';tab('network',false);graph.select(id);$('gid').value=id;dossier(byId.get(id));updateGraphTitle();renderQueue();
+ msg('Окружение клиента и наблюдаемый путь от исходных клиентов.');
+ if(persist){savePosition();if(matchMedia('(max-width:760px)').matches)requestAnimationFrame(()=>$('dossier').scrollIntoView({block:'start'}));}
 }
-function tables(){ $('top-count').textContent=data.top_nodes.length;$('top-body').innerHTML=data.top_nodes.map(n=>'<tr data-gid="'+esc(n.gid)+'"><td>'+esc(n.rank)+'</td><td><button data-gid="'+esc(n.gid)+'">'+esc(n.gid)+'</button></td><td><i class="dot" style="background:'+color(n.role)+'"></i>'+esc(role(n.role))+'</td><td>'+pct(n.priority_score)+'</td><td>'+esc(n.why)+'</td></tr>').join('')||'<tr><td colspan="5">Приоритеты ещё не рассчитаны.</td></tr>';
- $('cluster-list').innerHTML=data.clusters.map(c=>'<button class="cluster-card" data-cluster="'+esc(c.cluster_id)+'"><strong>Кластер '+esc(c.cluster_id)+'</strong><span>'+fmt(c.n_nodes)+' клиентов · '+fmt(c.n_seed)+' seed</span><span>Внутренний оборот '+money(c.sum_kzt_internal)+'</span><p>'+esc(c.hypothesis||'Гипотеза ещё не рассчитана')+'</p></button>').join('')||'<p>Кластеры ещё не рассчитаны.</p>';
- $('cluster').innerHTML='<option value="">Все кластеры</option>'+[...new Set(data.nodes.map(n=>String(n.cluster_id)))].sort((a,b)=>Number(a)-Number(b)).map(id=>'<option value="'+esc(id)+'">Кластер '+esc(id)+'</option>').join('');
- $('legend').innerHTML=[...new Set(data.nodes.map(n=>n.role))].map(r=>'<span><i class="dot" style="background:'+color(r)+'"></i>'+esc(role(r))+'</span>').join('');
+function renderQueue(){
+ const index=data.top_nodes.findIndex(n=>n.gid===selected);
+ $('queue-position').textContent=index<0?'Вне очереди':String(index+1).padStart(2,'0')+' / '+data.top_nodes.length;
+ $('queue-prev').disabled=index<=0;$('queue-next').disabled=!data.top_nodes.length||index===data.top_nodes.length-1;
+ $('queue-strip').innerHTML=data.top_nodes.map(n=>'<button class="queue-item '+(n.gid===selected?'active':'')+'" data-gid="'+esc(n.gid)+'" title="'+esc(n.gid)+' · '+esc(role(n.role))+'" aria-label="Приоритет '+esc(n.rank)+', клиент '+esc(n.gid)+'" aria-pressed="'+(n.gid===selected)+'"><span class="queue-number">'+String(n.rank).padStart(2,'0')+(decisions[n.gid]?' · '+(decisions[n.gid]==='check'?'✓':'−'):'')+'</span><strong>…'+esc(n.gid.slice(-9))+'</strong><small>'+esc(role(n.role))+'</small></button>').join('');
+ const active=$('queue-strip').querySelector('.active');if(active){const strip=$('queue-strip');if(active.offsetLeft<strip.scrollLeft||active.offsetLeft+active.offsetWidth>strip.scrollLeft+strip.clientWidth)strip.scrollLeft=active.offsetLeft-strip.offsetLeft;}
 }
-async function load(options={}){if($('reload').disabled)return;const quiet=options.quiet===true;const previous={selected,cluster:$('cluster').value,tab:document.querySelector('[data-tab].active')?.dataset.tab||'network',removal:removalCount};if(!quiet)msg('Загрузка и подготовка схемы…');$('reload').disabled=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);try{const response=await fetch('../out/graph.json',{cache:'no-store',signal:controller.signal});if(!response.ok)throw Error('HTTP '+response.status);const next=parseExact(await response.text());if(!next||!Array.isArray(next.nodes)||!next.nodes.length||!Array.isArray(next.edges)||!Array.isArray(next.top_nodes)||!Array.isArray(next.clusters))throw Error('Файл пуст или не соответствует контракту');if(quiet&&next.meta?.stub!==false)return;const ids=new Map(next.nodes.map(n=>[String(n.gid),n]));if(ids.size!==next.nodes.length||next.nodes.some(n=>typeof n.gid!=='string')||next.top_nodes.some(n=>typeof n.gid!=='string')||next.edges.some(e=>typeof e.src!=='string'||typeof e.dst!=='string'||!ids.has(e.src)||!ids.has(e.dst)))throw Error('В файле некорректные идентификаторы или связи');data=next;byId=ids;adj=new Map(data.nodes.map(n=>[String(n.gid),[]]));for(const e of data.edges){adj.get(String(e.src)).push(e);if(String(e.src)!==String(e.dst))adj.get(String(e.dst)).push(e)}selected=null;$('neighbors').disabled=true;$('stub').hidden=data.meta?.stub!==true;$('metrics').innerHTML=[['Клиентов',fmt(data.nodes.length)],['Связей',fmt(data.edges.length)],['Исходных · seed',fmt(data.nodes.filter(n=>n.is_seed).length)],['Оборот выборки',money(data.meta?.total_kzt)],['Период',data.meta?.period||'Не указан']].map(([label,value])=>'<div class="metric"><strong>'+esc(value)+'</strong><span>'+label+'</span></div>').join('');firstGraphFrame=true;layout();globalPoints=points;tables();renderTerminal();setupSimulation();tab('network');resize();filter();$('dossier').innerHTML='<div class="empty"><span>◎</span><h2>Выберите клиента</h2><p>Поиск по полному gid работает по всей сети, включая изолированные узлы.</p></div>';if(quiet){$('remove-count').value=Math.min(previous.removal,simulation.rankedIds.length);updateSimulation();if(previous.selected&&byId.has(previous.selected))selectNode(previous.selected);else if([...$('cluster').options].some(o=>o.value===previous.cluster)){$('cluster').value=previous.cluster;filter()}tab(previous.tab)}msg(quiet?'Расчёт завершён: загружены актуальные роли и обоснования.':'Данные загружены. Выберите узел или начните с приоритетов.')}catch(e){msg((data?'Не удалось обновить. На экране предыдущие данные. ':'Не удалось открыть схему. ')+'Проверьте out/graph.json и нажмите «Обновить данные». '+(e.name==='AbortError'?'Превышено время ожидания.':e.message),true)}finally{clearTimeout(timeout);$('reload').disabled=false}}
-$('search').onsubmit=e=>{e.preventDefault();const id=$('gid').value.trim();if(!data){msg('Дождитесь загрузки данных.',true);return}if(!id){msg('Введите полный gid клиента.',true);return}selectNode(id)};
-$('cluster').onchange=()=>{if(!data)return;selected=null;$('neighbors').disabled=true;tab('network');filter()};$('reload').onclick=load;$('reset').onclick=()=>{if(!data)return;selected=null;$('neighbors').disabled=true;$('cluster').value='';tab('network');filter();msg('Показана вся сеть')};$('fit').onclick=fit;
-function zoom(f,x=W/2,y=H/2){const old=scale;scale=Math.max(.015,Math.min(8,scale*f));ox=x-(x-ox)*scale/old;oy=y-(y-oy)*scale/old;draw()}
-$('neighbors').onclick=()=>{if(!selected)return;const ids=[...new Set((adj.get(selected)||[]).flatMap(e=>[String(e.src),String(e.dst)]))].filter(id=>id!==selected);points=new Map(globalPoints);points.set(selected,{x:0,y:0,n:byId.get(selected)});ids.forEach((id,i)=>{const angle=i*2.399963229728653,r=100+Math.sqrt(i)*24;points.set(id,{x:Math.cos(angle)*r,y:Math.sin(angle)*r,n:byId.get(id)})});const included=new Set([selected,...ids]);visible=[...included].map(id=>points.get(id));links=data.edges.filter(e=>included.has(String(e.src))&&included.has(String(e.dst)));$('graph-title').textContent='Связи выбранного клиента';$('visible-count').textContent=fmt(visible.length)+' клиентов · '+fmt(links.length)+' связей';fit();msg('Локальная схема: выбранный клиент и его непосредственные соседи. Для возврата нажмите «Вся сеть».')};
-$('zoom-in').onclick=()=>zoom(1.5);$('zoom-out').onclick=()=>zoom(1/1.5);
-document.addEventListener('click',e=>{const g=e.target.closest('[data-gid]'),c=e.target.closest('[data-cluster]'),t=e.target.closest('[data-tab]');if(g)selectNode(g.dataset.gid);if(c){$('cluster').value=c.dataset.cluster;selected=null;$('neighbors').disabled=true;tab('network');filter()}if(t)tab(t.dataset.tab)});
-try{document.body.classList.toggle('dark',localStorage.getItem('money-theme')==='dark')}catch(_){}$('theme').onclick=()=>{document.body.classList.toggle('dark');try{localStorage.setItem('money-theme',document.body.classList.contains('dark')?'dark':'light')}catch(_){}draw()};
-canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
-const pointers=new Map();let dragged=false,start=null;
-canvas.onpointerdown=e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});start={x:e.clientX,y:e.clientY};dragged=false};
-canvas.onpointermove=e=>{if(!pointers.has(e.pointerId))return;const old=pointers.get(e.pointerId),others=[...pointers.entries()].filter(([id])=>id!==e.pointerId);if(others.length){const other=others[0][1],before=Math.hypot(old.x-other.x,old.y-other.y),after=Math.hypot(e.clientX-other.x,e.clientY-other.y),r=canvas.getBoundingClientRect();if(before>0)zoom(after/before,(e.clientX+other.x)/2-r.left,(e.clientY+other.y)/2-r.top);dragged=true}else{ox+=e.clientX-old.x;oy+=e.clientY-old.y;if(start&&Math.hypot(e.clientX-start.x,e.clientY-start.y)>4)dragged=true;draw()}pointers.set(e.pointerId,{x:e.clientX,y:e.clientY})};
-canvas.onpointerup=e=>{pointers.delete(e.pointerId);if(dragged)return;const r=canvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let hit=null,best=Infinity;for(const p of visible){const distance=Math.hypot(p.x*scale+ox-x,p.y*scale+oy-y);if(distance<Math.max(12,radius(p.n)+4)&&distance<best){hit=p;best=distance}}if(hit)selectNode(hit.n.gid)};canvas.onpointercancel=e=>{pointers.delete(e.pointerId);dragged=true};
-new ResizeObserver(resize).observe(canvas);load();
-
-function setupSimulation(){
- simulation=buildRemovalSimulation(data.nodes,data.edges,50);
- removalCount=0;
- $('remove-count').max=simulation.rankedIds.length;
- $('remove-count').value=0;
- $('remove-count').disabled=false;
- updateSimulation();
+function moveQueue(delta){if(!data)return;const i=data.top_nodes.findIndex(n=>n.gid===selected),next=data.top_nodes[Math.max(0,i+delta)];if(next)selectNode(next.gid)}
+function restorePosition(){
+ if(!data)return;restoring=true;const u=new URL(location.href),id=u.searchParams.get('gid'),cluster=u.searchParams.get('cluster');
+ const n=Math.max(0,Math.min(50,Number(u.searchParams.get('remove'))||0));$('remove-count').value=n;updateSimulation();
+ if(id&&byId.has(id))selectNode(id,false);
+ else if(cluster&&[...$('cluster').options].some(o=>o.value===cluster)){overview();$('cluster').value=cluster;graph.clear();graph.filter(cluster);updateGraphTitle();}
+ else if(u.searchParams.has('view')){overview();graph.clear();updateGraphTitle();}
+ else if(data.top_nodes[0])selectNode(data.top_nodes[0].gid,false);
+ else {overview();graph.clear();updateGraphTitle();}
+ tab(u.searchParams.get('view')||'network',false);restoring=false;
+ if(id&&!byId.has(id))msg('Сохранённый клиент отсутствует в текущей выгрузке. Выберите клиента из очереди.',true);
 }
+function updateGraphTitle(){
+ $('graph-title').textContent=selected?'Денежное окружение':$('cluster').value?'Сообщество '+$('cluster').value:'Сеть переводов';
+ $('visible-count').textContent=fmt(graph.visible.length)+' клиентов · '+fmt(graph.filteredEdges?.length||0)+' связей';
+ $('map-note').textContent=selected?'Связи клиента и путь от исходных клиентов':'Обзор крупных переводов. Приблизьте для всех связей.';
+}
+function overview(){
+ selected=null;$('review-actions').hidden=true;if(data)renderQueue();$('inspector-label').textContent='ОЧЕРЕДЬ ПРОВЕРКИ';$('inspector-close').hidden=true;
+ $('dossier').innerHTML='<p class="queue-intro">Начните с этих клиентов.<br>Приоритет — рекомендация для проверки, не оценка виновности.</p>'+data.top_nodes.slice(0,6).map(n=>'<button class="priority-card" data-gid="'+esc(n.gid)+'"><div class="priority-top"><span class="priority-rank">'+String(n.rank).padStart(2,'0')+' / ПРИОРИТЕТ</span><span class="priority-score">'+pct(n.priority_score)+'</span></div><strong class="priority-gid">'+esc(n.gid)+'</strong><span class="role-label"><i class="dot" style="background:'+color(n.role)+'"></i>'+esc(role(n.role))+'</span><p>'+esc(n.why?.length>180?n.why.slice(0,177)+'…':n.why)+'</p></button>').join('')+'<button class="quiet" data-tab="top">Весь список · '+data.top_nodes.length+' клиентов ↗</button><div class="summary-note"><strong>Проверяем объяснение, а не только скор</strong>Откройте клиента: сопоставьте роль, суммы переводов и круг его связей.</div>';
+}
+function dossier(n){
+ const ranked=data.top_nodes.find(x=>x.gid===n.gid),edges=adj.get(n.gid)||[];
+ $('inspector-label').textContent=ranked?'ПРИОРИТЕТ '+String(ranked.rank).padStart(2,'0')+' / '+data.top_nodes.length:'ИССЛЕДОВАНИЕ КЛИЕНТА';$('inspector-close').hidden=false;
+ const facts=[['Индекс приоритета',pct(n.priority_score)],['Уверенность роли',pct(n.role_score)],['Входящих переводов',fmt(n.in_tx)],['Исходящих переводов',fmt(n.out_tx)],['Доля пропуска',n.pass_through==null?'Нет входящих':pct(n.pass_through)],['Колено обхода',n.depth],['Исходный клиент',n.is_seed?'Да':'Нет'],['Сообщество',n.cluster_id],['Наблюдение',terminalStatuses[n.terminal_status]?.label||'Не рассчитано']];
+ const boundary=n.terminal_status==='unknown_truncated'||n.truncated_by_depth;
+ const decision=decisions[n.gid];
+ $('dossier').innerHTML='<div class="node-kicker">GID · ИДЕНТИФИКАТОР КЛИЕНТА</div><h1 class="node-id">'+esc(n.gid)+'</h1><span class="hypothesis-label">Предполагаемая роль</span><h2 class="role-heading">'+esc(role(n.role))+'</h2><p class="case-reason">'+esc(ranked?.why||n.why||n.evidence||'Обоснование не предоставлено. Сопоставьте наблюдаемые связи.')+'</p>'+
+ (boundary?'<div class="note"><strong>Здесь заканчивается выгрузка.</strong><br>Исходящие за её границей неизвестны. Вероятность конечного получателя: <strong>'+pct(n.terminal_p)+'</strong> по модели.<br><button class="text-button" data-tab="terminal">Почему это важно →</button></div>':'')+
+ '<div class="funds-flow"><div><span>↘ ПОСТУПИЛО</span><strong>'+money(n.in_kzt)+'</strong><small>от '+fmt(n.in_deg)+' плательщиков</small></div><div><span>↗ ПЕРЕДАНО ДАЛЬШЕ</span><strong>'+money(n.out_kzt)+'</strong><small>'+fmt(n.out_deg)+' получателям</small></div></div>'+
+ (isRemoved(n.gid)?'<p class="note">Узел изъят в текущей симуляции. Исходные данные не изменены.</p>':'')+
+ '<div class="inspector-actions"><button id="neighbors">Окружение</button><button id="show-on-map">Положение во всей сети ↗</button></div>'+
+ '<details class="case-detail"><summary>Основания и показатели</summary><div class="evidence">'+esc(n.evidence||'Нет дополнительных оснований')+'</div><div class="facts">'+facts.map(([k,v])=>'<div><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></div>').join('')+'</div>'+(n.is_seed||n.pass_through>1?'<p class="note">Внешние поступления не видны. Эти суммы не отражают полный баланс клиента.</p>':'')+'</details>'+
+ '<details class="case-detail"><summary>Контрагенты и переводы · '+edges.length+'</summary>'+([...edges].sort((a,b)=>b.sum_kzt-a.sum_kzt).map(e=>{const incoming=e.dst===n.gid,other=incoming?e.src:e.dst;return '<button class="neighbor" data-gid="'+esc(other)+'">'+(incoming?'← От ':'→ К ')+esc(other)+'<span>'+money(e.sum_kzt)+' · '+fmt(e.n_tx)+' переводов</span></button>'}).join('')||'<p class="muted">В предоставленной выборке переводов нет. Это не означает отсутствия операций вне неё.</p>')+'</details>';
+ $('review-actions').hidden=false;$('review-actions').innerHTML='<div class="case-decision"><button id="mark-check" class="'+(decision==='check'?'primary':'')+'">'+(decision==='check'?'✓ В проверку':'В проверку')+'</button><button id="mark-later">'+(decision==='later'?'✓ Отложен':'Отложить')+'</button></div><p class="decision-note '+(decision?'saved':'')+'">'+(decision?'Метка сохранена в этом браузере. Повторное нажатие снимает её.':'Личная отметка в этом браузере. Не блокирует клиента.')+'</p>';
+ const mark=value=>{if(decisions[n.gid]===value)delete decisions[n.gid];else decisions[n.gid]=value;try{localStorage.setItem('money-review',JSON.stringify(decisions))}catch(_){msg('Браузер не разрешил сохранить отметку. Она действует до закрытия страницы.',true)}dossier(n);renderQueue()};
+ $('mark-check').onclick=()=>mark('check');$('mark-later').onclick=()=>mark('later');
+ $('neighbors').onclick=()=>{tab('network');graph.select(n.gid);updateGraphTitle()};
+ $('show-on-map').onclick=()=>{tab('network');graph.select(n.gid);graph.filter('',false);updateGraphTitle();$('graph-title').textContent='Клиент в структуре сети'};
+}
+function tables(){
+ $('top-count').textContent=data.top_nodes.length;$('boundary-count').textContent=fmt(data.nodes.filter(n=>n.terminal_status==='unknown_truncated').length);$('boundary-title').textContent=$('boundary-count').textContent+' клиента. Продолжение неизвестно.';
+ $('top-body').innerHTML=data.top_nodes.map(n=>'<tr data-gid="'+esc(n.gid)+'"><td>'+esc(n.rank)+'</td><td><button data-gid="'+esc(n.gid)+'">'+esc(n.gid)+'</button></td><td><i class="dot" style="background:'+color(n.role)+'"></i>'+esc(role(n.role))+'</td><td>'+pct(n.priority_score)+'</td><td>'+esc(n.why)+'</td></tr>').join('')||'<tr><td colspan="5">Приоритеты ещё не рассчитаны.</td></tr>';
+ $('cluster-list').innerHTML=data.clusters.map(c=>'<button class="cluster-card" data-cluster="'+esc(c.cluster_id)+'"><strong>Сообщество '+esc(c.cluster_id)+'</strong><span>'+fmt(c.n_nodes)+' клиентов · '+fmt(c.n_seed)+' seed</span><span>Внутренний оборот '+money(c.sum_kzt_internal)+'</span><p>'+esc(c.hypothesis||'Гипотеза ещё не рассчитана')+'</p></button>').join('');
+ $('cluster').innerHTML='<option value="">Все сообщества</option>'+[...new Set(data.nodes.map(n=>String(n.cluster_id)))].sort((a,b)=>Number(a)-Number(b)).map(id=>'<option value="'+esc(id)+'">Сообщество '+esc(id)+'</option>').join('');
+ $('legend').innerHTML='<span>● Клиент</span><span style="color:var(--accent)">● Выбранный / исходный</span><span>→ Перевод</span>';
+}
+function setupSimulation(){simulation=buildRemovalSimulation(data.nodes,data.edges,50);removalCount=0;$('remove-count').max=simulation.rankedIds.length;$('remove-count').value=0;$('remove-max').textContent=simulation.rankedIds.length;$('remove-count').disabled=false;updateSimulation()}
 function updateSimulation(){
- if(!simulation)return;
- removalCount=Math.max(0,Math.min(simulation.rankedIds.length,Number($('remove-count').value)||0));
- const state=simulation.states[removalCount],baseline=simulation.states[0];
- $('remove-value').textContent=removalCount;
- $('remove-count').setAttribute('aria-valuetext','Изъято '+removalCount+' узлов');
- $('simulation-result').innerHTML='Сеть '+(removalCount?'после изъятия':'до изъятия')+': <span class="simulation-result-number">'+fmt(state.components)+' фрагментов</span> (было '+fmt(baseline.components)+'). Отрезано <span class="simulation-result-number">'+pct(state.cutShare)+' оборота</span> · '+money(state.cut)+'. Крупнейший фрагмент: '+fmt(state.largest)+' из '+fmt(state.remaining)+' оставшихся клиентов.';
+ if(!simulation)return;removalCount=Math.max(0,Math.min(simulation.rankedIds.length,Number($('remove-count').value)||0));const state=simulation.states[removalCount];$('remove-value').textContent=removalCount;$('remove-count').setAttribute('aria-valuetext','Изъято '+removalCount+' узлов');$('sim-components').textContent=fmt(state.components);$('sim-cut').textContent=pct(state.cutShare);
+ $('simulation-result').textContent='До изъятия: '+fmt(simulation.states[0].components)+' фрагментов. После: '+fmt(state.components)+'. Затронуто '+money(state.cut)+' переводов. Крупнейший фрагмент — '+fmt(state.largest)+' из '+fmt(state.remaining)+' оставшихся клиентов.';
  $('removed-list').innerHTML=simulation.rankedIds.slice(0,removalCount).map((id,i)=>'<button data-gid="'+esc(id)+'">'+(i+1)+'. '+esc(id)+'</button>').join('')||'Узлы не изъяты.';
- if(selected)dossier(byId.get(selected));
- draw();
+ graph.setRemoved(simulation.rankedIds.slice(0,removalCount));if(selected)dossier(byId.get(selected));
 }
-$('remove-count').addEventListener('input',()=>{if(simulationFrame)return;simulationFrame=requestAnimationFrame(()=>{simulationFrame=0;updateSimulation()})});
-$('simulation-reset').onclick=()=>{$('remove-count').value=0;updateSimulation()};
-
-setInterval(()=>{if(data?.meta?.stub===true&&!document.hidden&&!$('reload').disabled)load({quiet:true})},15000);
-
-function renderTerminal(){
- const summary=summarizeTerminal(data.nodes),count=summary.counts;
- if(summary.missing===data.nodes.length){$('terminal-content').innerHTML='<p class="note">Статусы границы наблюдения ещё не рассчитаны. Обновите данные после завершения расчёта.</p>';return}
- const maximum=Math.max(1,...Object.values(count));
- const bars=Object.entries(terminalStatuses).map(([key,status])=>'<div class="status-bar"><div><strong>'+status.label+'</strong><b>'+fmt(count[key])+'</b></div><div class="bar-track"><div style="width:'+(count[key]/maximum*100)+'%;background:'+status.color+'"></div></div><p>'+status.hint+'</p></div>').join('');
- const threshold=data.meta?.method?.thresholds?.terminal_p_min?.value;
- const thresholdText=typeof threshold==='number'?' Порог назначения роли для обрезанного узла в текущем расчёте: '+pct(threshold)+'.':'';
- $('terminal-content').innerHTML=(summary.missing?'<p class="note">У '+fmt(summary.missing)+' клиентов статус отсутствует или неизвестен. Разбивка неполная.</p>':'')+
- '<div class="terminal-overview"><div class="status-bars" aria-label="Распределение статусов по всей сети">'+bars+'</div><div class="terminal-comparison"><div class="comparison-card naive"><span>Наивно: получил, но не отдал</span><strong>'+fmt(summary.naive)+'</strong><p>Всех таких клиентов записали бы в конечные получатели.</p></div><div class="comparison-card"><span>С учётом границы наблюдения</span><strong>'+fmt(summary.corrected)+'</strong><p>'+fmt(count.observed_sink)+' наблюдаемых стоков + '+fmt(summary.estimated)+' кандидатов среди обрезанных узлов, которым модель назначила роль конечного получателя.</p></div></div></div>'+
- '<p class="note">У '+fmt(count.unknown_truncated)+' узлов обход закончился на границе глубины. Закончилась выгрузка, а не обязательно движение денег. Из них '+fmt(summary.estimated)+' получили роль конечного получателя; '+fmt(count.unknown_truncated-summary.estimated)+' не получили эту роль. Для каждого обрезанного узла показываем вероятность, а не установленный факт.</p>'+
- '<details class="terminal-method"><summary>Как читать вероятность и почему число ролей отличается</summary><p>Вероятность рассчитана логистической регрессией по входящему профилю клиента и профилю его плательщиков, с обучением на коленах 1–3. Это оценка модели: продолжение переводов за пределами выгрузки неизвестно.'+thresholdText+'</p><p>Статус наблюдения и аналитическая роль — разные показатели. В текущей выгрузке роль «Конечный получатель» имеют '+fmt(summary.terminalRoles)+' клиентов: '+fmt(summary.forwardingTerminals)+' из них передают часть денег дальше; '+fmt(summary.observedOtherRoles)+' наблюдаемых стоков получили другую структурную роль. Поэтому '+fmt(summary.corrected)+' в сравнении выше — наблюдаемые стоки плюс кандидаты за границей обхода, а не количество ролей terminal.</p><p>Наблюдаемый сток тоже относится только к данной выборке: внешние и более поздние переводы здесь не видны.</p></details>'+
- '<h3>Обрезанные узлы · '+fmt(summary.truncated.length)+'</h3><p class="terminal-caption">По убыванию вероятности. Выберите gid, чтобы открыть досье и связи.</p><div class="table-wrap"><table><thead><tr><th>Клиент · gid</th><th>Вероятность стока</th><th>Роль в расчёте</th><th>Получил</th></tr></thead><tbody>'+summary.truncated.map(n=>'<tr data-gid="'+esc(n.gid)+'"><td><button data-gid="'+esc(n.gid)+'">'+esc(n.gid)+'</button></td><td>'+ (n.terminal_p==null?'Не рассчитана':pct(n.terminal_p))+'</td><td>'+esc(role(n.role))+'</td><td>'+money(n.in_kzt)+'</td></tr>').join('')+'</tbody></table></div>';
+function validate(next){
+ if(!next||!Array.isArray(next.nodes)||!next.nodes.length||!Array.isArray(next.edges)||!Array.isArray(next.top_nodes)||!Array.isArray(next.clusters))throw Error('Файл пуст или не соответствует контракту');
+ const ids=new Map(next.nodes.map(n=>[n.gid,n]));
+ if(ids.size!==next.nodes.length||next.nodes.some(n=>typeof n.gid!=='string'||!/^\d{18}$/.test(n.gid))||next.top_nodes.some(n=>typeof n.gid!=='string'||!ids.has(n.gid))||next.edges.some(e=>typeof e.src!=='string'||typeof e.dst!=='string'||!ids.has(e.src)||!ids.has(e.dst))||next.clusters.some(c=>!Array.isArray(c.top_gids)||c.top_gids.some(id=>typeof id!=='string'||!ids.has(id))))throw Error('Некорректные идентификаторы или связи. Ожидаются точные строковые gid.');
+ if(next.nodes.some(n=>!Number.isFinite(n.x)||!Number.isFinite(n.y)||n.x<0||n.x>1||n.y<0||n.y>1))throw Error('Отсутствуют корректные координаты сети.');
+ if(next.edges.some(e=>!Number.isFinite(e.sum_kzt)||e.sum_kzt<0))throw Error('Некорректные суммы переводов.');
+ return ids;
 }
+async function load(options={}){
+ if(loading)return;loading=true;$('reload').disabled=true;const quiet=options.quiet===true||!!data,previous={selected,cluster:$('cluster').value,tab:currentTab,removal:removalCount};if(!quiet)msg('Загрузка и проверка данных…');const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+ try{const response=await fetch('../out/graph.json',{cache:'no-store',signal:controller.signal});if(!response.ok)throw Error('HTTP '+response.status);const text=await response.text(),next=JSON.parse(text),signature=text;if(quiet&&signature===fingerprint)return;const ids=validate(next);data=next;byId=ids;fingerprint=signature;adj=new Map(data.nodes.map(n=>[n.gid,[]]));for(const e of data.edges){adj.get(e.src).push(e);if(e.src!==e.dst)adj.get(e.dst).push(e)}
+  selected=null;$('stub').hidden=data.meta?.stub!==true;$('data-label').textContent=data.meta?.stub?'Предварительный расчёт':'Расчёт выполнен';$('period-label').textContent=(data.meta?.period==='2026-07-01..2026-07-31'?'Июль 2026':(data.meta?.period||'Период не указан').replace('..',' — '));
+  $('metrics').innerHTML=[['Клиентов в сети',fmt(data.nodes.length)],['Исходных · seed',fmt(data.nodes.filter(n=>n.is_seed).length)],['Связей',fmt(data.edges.length)],['Оборот выборки',data.meta?.total_kzt!=null?(data.meta.total_kzt/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})+' млн ₸':'—']].map(([label,value])=>'<div class="metric"><strong>'+esc(value)+'</strong><span>'+label+'</span></div>').join('');
+  tables();renderTerminal();graph.setData(data);setupSimulation();overview();$('graph-loading').hidden=true;$('footer-status').textContent=fmt(data.nodes.length)+' клиентов · '+fmt(data.edges.length)+' связей · KZT';$('case-scope').textContent='Исходных: '+fmt(data.nodes.filter(n=>n.is_seed).length)+' → '+fmt(data.nodes.length)+' клиентов · '+(Number(data.meta?.total_kzt||0)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})+' млн ₸';
+  if(quiet){restoring=true;$('remove-count').value=Math.min(previous.removal,simulation.rankedIds.length);updateSimulation();if(previous.selected&&byId.has(previous.selected))selectNode(previous.selected,false);else if([...$('cluster').options].some(o=>o.value===previous.cluster)){$('cluster').value=previous.cluster;graph.filter(previous.cluster)}tab(previous.tab,false);restoring=false;msg('Данные обновлены. Выбранный клиент и сценарий сохранены.')}else{restorePosition();savePosition(true)}updateGraphTitle();renderQueue();
+
+ }catch(e){msg((data?'Обновление не удалось; сохранены предыдущие данные. ':'Не удалось открыть граф. ')+'Нажмите «Обновить данные», чтобы повторить. '+(e.name==='AbortError'?'Истекло время ожидания.':e.message),true);if(!data){$('data-label').textContent='Данные недоступны';$('inspector-label').textContent='ЗАГРУЗКА ПРЕРВАНА';$('graph-title').textContent='Не удалось открыть сеть';$('visible-count').textContent='Повторите загрузку кнопкой ↻';$('graph-loading').innerHTML='<strong>Граф пока недоступен</strong><span>Причина показана над рабочей областью.</span>';$('dossier').innerHTML='<p class="note">Данные не загружены. Нажмите ↻ после проверки файла.</p>'}}finally{clearTimeout(timer);loading=false;$('reload').disabled=false}
+}
+$('search').onsubmit=e=>{e.preventDefault();const id=$('gid').value.trim();if(!data){msg('Дождитесь загрузки данных.',true);return}if(!id){msg('Введите полный gid клиента.',true);return}selectNode(id)};
+$('reload').onclick=()=>load({quiet:!!data});$('theme').onclick=()=>{document.body.classList.toggle('dark');try{localStorage.setItem('money-theme',document.body.classList.contains('dark')?'dark':'light')}catch(_){}graph.cacheColors();graph.request()};
+$('cluster').onchange=()=>{if(!data)return;overview();graph.selected=null;graph.near.clear();graph.focusEdges.clear();tab('network',false);graph.filter($('cluster').value);updateGraphTitle();savePosition()};
+$('reset').onclick=()=>{if(!data)return;$('cluster').value='';overview();tab('network',false);graph.clear();updateGraphTitle();msg('Вся сеть. Откройте клиента из очереди или найдите его по gid.');savePosition()};$('inspector-close').onclick=()=>tab('top');
+$('zoom-in').onclick=()=>graph.zoom(1.4);$('zoom-out').onclick=()=>graph.zoom(1/1.4);$('fit').onclick=()=>graph.fit();
+$('remove-count').addEventListener('input',()=>{if(simulationFrame)return;simulationFrame=requestAnimationFrame(()=>{simulationFrame=0;updateSimulation();savePosition(true)})});$('simulation-reset').onclick=()=>{$('remove-count').value=0;updateSimulation();savePosition(true)};
+document.addEventListener('click',e=>{const g=e.target.closest('[data-gid]'),c=e.target.closest('[data-cluster]'),t=e.target.closest('[data-tab]');if(g)selectNode(g.dataset.gid);if(c){$('cluster').value=c.dataset.cluster;$('cluster').onchange()}if(t)tab(t.dataset.tab)});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('gid').focus();$('gid').select()}});
+$('queue-prev').onclick=()=>moveQueue(-1);$('queue-next').onclick=()=>moveQueue(1);
+window.addEventListener('popstate',restorePosition);
+const mobileLayout=matchMedia('(max-width:760px)'),searchHeader=document.querySelector('.workspace-header');
+function placeSearch(){if(mobileLayout.matches)document.querySelector('.workbench').insertBefore(searchHeader,document.querySelector('.workspace'));else document.querySelector('.workspace').prepend(searchHeader)}
+mobileLayout.addEventListener('change',placeSearch);placeSearch();
+load();setInterval(()=>{if(data&&!document.hidden&&!loading)load({quiet:true})},30000);
