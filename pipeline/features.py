@@ -36,7 +36,13 @@ def structural(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
     # PageRank по сумме — влияние узла в потоке денег
     df["pagerank"] = df.gid.map(nx.pagerank(G, weight="sum_kzt")).fillna(0.0)
     # HITS: authority — «сборщик», hub — «источник рассылки»
-    hubs, auth = nx.hits(G, max_iter=1000, normalized=True)
+    # HITS решается через собственные векторы и на графе без рёбер падает
+    # внутри scipy (ARPACK: «starting vector is zero»). Для вырожденного графа
+    # хаб и авторитет не определены — ставим нули, роли от них не зависят.
+    try:
+        hubs, auth = nx.hits(G, max_iter=1000, normalized=True)
+    except Exception:
+        hubs = auth = {g: 0.0 for g in G.nodes}
     # hub/authority неотрицательны по определению; у мелких значений остаётся
     # численный шум порядка 1e-19, из-за которого два прогона давали разные
     # байты в выгрузке — отсекаем, чтобы результат был строго воспроизводим
@@ -78,8 +84,15 @@ def structural(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
         s = g.groupby(by)[val].sum()
         tot = s.sum()
         return float(((s / tot) ** 2).sum()) if tot > 0 else np.nan
-    in_hhi = e.groupby("dst").apply(lambda g: hhi(g, "src", "sum_kzt"), include_groups=False)
-    out_hhi = e.groupby("src").apply(lambda g: hhi(g, "dst", "sum_kzt"), include_groups=False)
+    # на пустом наборе рёбер groupby().apply() возвращает не Series, а пустой
+    # DataFrame, и map() по нему падает — поэтому вырожденный случай отдельно
+    if e.empty:
+        in_hhi = out_hhi = pd.Series(dtype=float)
+    else:
+        in_hhi = e.groupby("dst").apply(lambda g: hhi(g, "src", "sum_kzt"),
+                                        include_groups=False)
+        out_hhi = e.groupby("src").apply(lambda g: hhi(g, "dst", "sum_kzt"),
+                                         include_groups=False)
     df["in_hhi"] = df.gid.map(in_hhi)
     df["out_hhi"] = df.gid.map(out_hhi)
 
@@ -99,10 +112,13 @@ def structural(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
     # какая доля поступлений пришла от «веерных» плательщиков: если платил узел,
     # рассылающий на десятки адресов, получатель чаще оказывается листом цепочки
     fan_t = float(df.out_deg.quantile(0.975))
-    w2 = w.assign(x=w.sum_kzt * (w.p_out >= fan_t))
-    fan_share = w2.groupby("dst").apply(
-        lambda g: g.x.sum() / g.sum_kzt.sum() if g.sum_kzt.sum() else np.nan,
-        include_groups=False)
+    if e.empty:
+        fan_share = pd.Series(dtype=float)
+    else:
+        w2 = w.assign(x=w.sum_kzt * (w.p_out >= fan_t))
+        fan_share = w2.groupby("dst").apply(
+            lambda g: g.x.sum() / g.sum_kzt.sum() if g.sum_kzt.sum() else np.nan,
+            include_groups=False)
     df["fan_payer_share"] = df.gid.map(fan_share)
 
     # взаимные пары (A->B и B->A) и участие в коротком цикле — возвратные потоки
@@ -192,8 +208,8 @@ def temporal(ds: Dataset) -> pd.DataFrame:
                 r["fast_out_share"] = float(fast_sum / tot_sum) if tot_sum else np.nan
         rows.append(r)
 
-    t = pd.DataFrame(rows)
-    return t
+    # без транзакций временных признаков нет, но колонка gid нужна для merge
+    return pd.DataFrame(rows) if rows else pd.DataFrame({"gid": pd.Series(dtype="int64")})
 
 
 def build(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
@@ -203,9 +219,16 @@ def build(G: nx.DiGraph, ds: Dataset) -> pd.DataFrame:
     receivers = ds.edges.groupby("src").dst.apply(set)
     df["payer_set"] = [payers.get(g, set()) for g in df.gid]
     df["receiver_set"] = [receivers.get(g, set()) for g in df.gid]
+    # временные признаки: целочисленные получают значение по умолчанию,
+    # остальные остаются пустыми. Колонки создаются даже если транзакций нет
+    # вовсе — иначе дальше по конвейеру не найдётся ожидаемое поле
     for col, default in (("max_same_day_payers", 0), ("max_same_day_receivers", 0),
                          ("max_same_day_one_payer_tx", 0), ("n_in_days", 0),
                          ("n_out_days", 0), ("days_after_last_in", -1)):
-        if col in df:
-            df[col] = df[col].fillna(default).astype(int)
+        df[col] = (df[col].fillna(default).astype(int) if col in df
+                   else pd.Series(default, index=df.index, dtype=int))
+    for col in ("hold_days_median", "hold_days_min", "fast_out_share",
+                "first_in_date", "last_in_date", "first_out_date", "last_out_date"):
+        if col not in df:
+            df[col] = pd.Series(pd.NA, index=df.index, dtype="object")
     return df

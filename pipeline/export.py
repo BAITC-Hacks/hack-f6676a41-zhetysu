@@ -81,6 +81,23 @@ def _clean(v):
     return v
 
 
+def _deep_clean(o):
+    """Рекурсивно приводит документ к строгому JSON: NaN и inf → null.
+
+    `_clean` применяется к полям узлов, но в `meta` попадают отчёты метода
+    целиком, а в них NaN возможен — например AUC не определён, если в выборке
+    остался один класс. `JSON.parse` в браузере на `NaN` падает, поэтому
+    страхуемся на самом выходе, а не в каждом отчёте по отдельности.
+    """
+    if isinstance(o, dict):
+        return {k: _deep_clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_deep_clean(v) for v in o]
+    if isinstance(o, float) and (math.isnan(o) or math.isinf(o)):
+        return None
+    return o
+
+
 def _terminal_breakdown(nodes: pd.DataFrame, thresholds: dict) -> dict:
     """Ответ на вопрос «почему у вас больше половины сети — конечные получатели».
 
@@ -205,7 +222,8 @@ def write_graph_json(nodes: pd.DataFrame, edges: pd.DataFrame,
     path = out_dir / "graph.json"
     tmp = out_dir / "graph.json.tmp"
     with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(doc, fh, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        json.dump(_deep_clean(doc), fh, ensure_ascii=False, allow_nan=False,
+                  separators=(",", ":"))
     tmp.replace(path)   # интерфейс читает файл целиком — подменяем атомарно
 
 

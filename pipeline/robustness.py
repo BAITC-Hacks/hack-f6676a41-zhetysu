@@ -67,8 +67,10 @@ def _metrics(idx_alive: np.ndarray, src: np.ndarray, dst: np.ndarray,
     n_alive = int(idx_alive.sum())
     total_w = w.sum()
     if n_alive == 0:
+        # изъяты все узлы: набор ключей тот же, что и в обычной ветке, иначе
+        # вызывающий код падает на отсутствующем поле
         return {"lcc_share": 0.0, "n_components": 0, "cut_kzt_share": 1.0,
-                "seed_reach_share": 0.0, "seed_reach_kzt_share": 0.0}
+                "seed_reach_nodes": 0, "seed_reach_kzt": 0.0}
 
     m = coo_matrix(
         (np.ones(keep_edge.sum()), (src[keep_edge], dst[keep_edge])),
@@ -123,7 +125,9 @@ def curves(nodes: pd.DataFrame, edges: pd.DataFrame) -> dict:
 
     order = (nodes.sort_values(["priority_score", "gid"], ascending=[False, True])
                   .gid.map(pos).to_numpy())
-    ks = list(range(0, MAX_N + 1))
+    # на графе меньше MAX_N узлов изымать 50 нечего: кривая строится до того,
+    # сколько узлов есть. На выгрузке организаторов (2248 узлов) это не влияет
+    ks = list(range(0, min(MAX_N, max(n_nodes - 1, 0)) + 1))
 
     tgt = {k: [] for k in KEYS}
     for k in ks:
@@ -194,5 +198,5 @@ def curves(nodes: pd.DataFrame, edges: pd.DataFrame) -> dict:
         "targeted": tgt,
         "random_mean": rnd,
         "random_std": rnd_sd,
-        "summary": {f"at_{k}": at(k) for k in (10, 20, 30, 50)},
+        "summary": {f"at_{k}": at(k) for k in (10, 20, 30, 50) if k in ks},
     }

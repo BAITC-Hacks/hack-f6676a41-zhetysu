@@ -34,6 +34,8 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
         f"оборот {stats['total_kzt']:,.0f} KZT")
     log(f"      узлов без рёбер: {stats['n_no_edges']} "
         f"(seed среди них: {stats['n_no_edges_seed']})")
+    for w in stats["warnings"]:
+        log(f"      ВНИМАНИЕ: {w}")
 
     log("[2/9] сборка направленного взвешенного графа")
     G, UG = graphbuild.build(ds)
@@ -90,13 +92,16 @@ def build_all(data_dir: Path, out_dir: Path) -> dict:
 
     log("[9/9] устойчивость сети: изъятие топ-N против случайного, и выгрузки")
     rob = robustness.curves(nodes, ds.edges)
-    at20 = rob["summary"]["at_20"]
-    log(f"      изъятие топ-20 против случайных 20: оборот на маршрутах от seed "
-        f"остаётся {at20['targeted_seed_reach_kzt_share']:.1%} против "
-        f"{at20['random_seed_reach_kzt_share']:.1%}, отрезано оборота "
-        f"{at20['targeted_cut_kzt_share']:.1%} против {at20['random_cut_kzt_share']:.1%} "
-        f"(в {at20['cut_ratio']} раза), крупнейшая компонента "
-        f"{at20['targeted_lcc_share']:.2f} против {at20['random_lcc_share']:.2f}")
+    at20 = rob["summary"].get("at_20")
+    if at20 is None:      # граф меньше 20 узлов — кривая короче, сводки нет
+        log("      граф слишком мал для сводки по 20 узлам, кривые считаны целиком")
+    else:
+        log(f"      изъятие топ-20 против случайных 20: оборот на маршрутах от seed "
+            f"остаётся {at20['targeted_seed_reach_kzt_share']:.1%} против "
+            f"{at20['random_seed_reach_kzt_share']:.1%}, отрезано оборота "
+            f"{at20['targeted_cut_kzt_share']:.1%} против {at20['random_cut_kzt_share']:.1%} "
+            f"(в {at20['cut_ratio']} раза), крупнейшая компонента "
+            f"{at20['targeted_lcc_share']:.2f} против {at20['random_lcc_share']:.2f}")
     elapsed = round(time.perf_counter() - t0, 2)
     export.write_csv(nodes, cl_tab, top, out_dir)
     export.write_graph_json(
@@ -126,8 +131,11 @@ def _cens_brief(r: dict) -> dict:
 def verify(nodes, cl_tab, top, out_dir: Path, stats: dict) -> dict:
     """Самопроверка выгрузок — то же, что будет проверять жюри механически."""
     n = pd.read_csv(out_dir / "nodes_roles.csv")
+    # строк должно быть столько, сколько клиентов на входе. Для выгрузки
+    # организаторов это и есть 2248 — требование ТЗ проверяется отдельной
+    # строкой ниже, чтобы на другом наборе данных проверка не падала ложно
     checks = {
-        "nodes_roles.csv строк == 2248": len(n) == 2248,
+        "строк по числу клиентов на входе": len(n) == stats["n_nodes"],
         "gid уникален": n.gid.is_unique,
         "роль у каждого узла": n.role.notna().all() and (n.role != "").all(),
         "роли только из словаря": set(n.role) <= set(config.ROLES),
@@ -139,11 +147,17 @@ def verify(nodes, cl_tab, top, out_dir: Path, stats: dict) -> dict:
         "evidence <= 200 символов": (n.evidence.str.len() <= 200).all(),
         "clusters.csv непустой": len(cl_tab) > 0,
         "гипотеза у каждого кластера": (cl_tab.hypothesis.str.len() > 0).all(),
-        "top_nodes.csv >= 20 строк": len(top) >= 20,
+        "top_nodes.csv >= 20 строк либо весь граф":
+            len(top) >= min(20, stats["n_nodes"]),
         "top отсортирован по приоритету": top.priority_score.is_monotonic_decreasing,
         "все кластеры узлов есть в clusters.csv":
             set(n.cluster_id) == set(cl_tab.cluster_id),
     }
+    # требования схемы ТЗ — только для выгрузки организаторов
+    if stats["n_nodes"] == 2248:
+        checks["ТЗ: ровно 2248 строк ролей"] = len(n) == 2248
+        checks["ТЗ: не менее 20 узлов в топ-листе"] = len(top) >= 20
+
     bad = [k for k, v in checks.items() if not v]
     log("      самопроверка: " + ("все пункты пройдены" if not bad
                                   else "ПРОВАЛЕНО → " + "; ".join(bad)))

@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">Граф денег — схема решения: данные, метрики, роли, интерфейс</title>
+<desc id="dsc">Четыре этапа: банковская выгрузка из трёх файлов parquet; метрики узла на направленном графе; присвоение ролей по 12 правилам с порогами-квантилями; интерфейс аналитика со схемой сети, топ-листом приоритетов и выгрузками.</desc>
+
+<!--
+  Цвета заданы атрибутами прямо на элементах: схема одинаково открывается
+  в браузере, конвертируется в PNG и вставляется в слайд.
+  Блок ниже переключает её в тёмную тему там, где браузер об этом сообщает;
+  любой другой отрисовщик его просто игнорирует и рисует светлый вариант.
+-->
+<style>
+@media (prefers-color-scheme: dark) {
+  .bg     { fill: #0d1016; }
+  .panel  { fill: #161b23; stroke: #2a313c; }
+  .soft   { fill: #1b2740; }
+  .notebg { fill: #1c222c; stroke: #2a313c; }
+  .rule   { stroke: #2a313c; }
+  .ink    { fill: #eef2f8; }
+  .muted  { fill: #98a3b4; }
+  .acc    { fill: #78a4ff; }
+  .bar    { fill: #78a4ff; }
+}
+</style>
+
+<rect class="bg" x="0" y="0" width="1600" height="920" fill="#ffffff"/>
+
+<!-- ─────────── шапка ─────────── -->
+<text class="ink"   x="36" y="56" font-family="Segoe UI, Helvetica Neue, system-ui, sans-serif" font-size="38" font-weight="700" fill="#12161d">Граф денег — как устроено решение</text>
+<text class="muted" x="36" y="88" font-family="Segoe UI, Helvetica Neue, system-ui, sans-serif" font-size="20" fill="#59626f">данные → метрики → роли → интерфейс &#160;·&#160; 2 248 клиентов, 3 119 связей, 365,9 млн KZT за июль 2026 &#160;·&#160; команда Zhetysu</text>
+
+<!-- ─────────── стрелки между этапами ─────────── -->
+<path class="acc" d="M 396 420 h 20 v -14 l 22 20 -22 20 v -14 h -20 z" fill="#1d4ed8"/>
+<path class="acc" d="M 788 420 h 20 v -14 l 22 20 -22 20 v -14 h -20 z" fill="#1d4ed8"/>
+<path class="acc" d="M 1180 420 h 20 v -14 l 22 20 -22 20 v -14 h -20 z" fill="#1d4ed8"/>
+
+<g font-family="Segoe UI, Helvetica Neue, system-ui, sans-serif">
+
+<!-- ═══════════ 1 · ДАННЫЕ ═══════════ -->
+<rect class="panel" x="36" y="120" width="352" height="640" rx="14" fill="#f5f6f8" stroke="#d5dae1"/>
+<rect class="bar"   x="36" y="120" width="352" height="4"  rx="2"  fill="#1d4ed8"/>
+<text class="acc"   x="60" y="160" font-size="16" font-weight="700" letter-spacing="2.4" fill="#1d4ed8">ЭТАП 1</text>
+<text class="ink"   x="60" y="194" font-size="27" font-weight="700" fill="#12161d">Данные</text>
+<text class="muted" x="60" y="222" font-size="17" fill="#59626f">выгрузка банка, три файла .parquet</text>
+
+<text class="muted" x="60"  y="268" font-size="19" fill="#59626f">клиенты</text>
+<text class="ink"   x="364" y="270" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">2 248</text>
+<text class="muted" x="60"  y="306" font-size="19" fill="#59626f">связи</text>
+<text class="ink"   x="364" y="308" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">3 119</text>
+<text class="muted" x="60"  y="344" font-size="19" fill="#59626f">переводы</text>
+<text class="ink"   x="364" y="346" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">4 840</text>
+<text class="muted" x="60"  y="382" font-size="19" fill="#59626f">оборот</text>
+<text class="ink"   x="364" y="384" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">365,9 млн KZT</text>
+
+<line class="rule" x1="60" y1="412" x2="364" y2="412" stroke="#d5dae1"/>
+
+<text class="ink" x="60" y="450" font-size="19" fill="#12161d">81 клиент известен следствию</text>
+<text class="ink" x="60" y="480" font-size="19" fill="#12161d">обход: только исходящие,</text>
+<text class="ink" x="60" y="506" font-size="19" fill="#12161d">глубина 4 колена, июль 2026</text>
+
+<rect class="soft"  x="60" y="534" width="304" height="126" rx="10" fill="#e6ecfd"/>
+<text class="ink"   x="80" y="568" font-size="17" font-weight="700" fill="#12161d">444 узла обрезаны 4-м коленом</text>
+<text class="ink"   x="80" y="594" font-size="16" fill="#12161d">их исходящие никто не выгружал:</text>
+<text class="ink"   x="80" y="618" font-size="16" fill="#12161d">артефакт обхода, а не «деньги осели»</text>
+<text class="ink"   x="80" y="642" font-size="16" fill="#12161d">переводы ниже 5 000 KZT не видны</text>
+
+<!-- ═══════════ 2 · МЕТРИКИ ═══════════ -->
+<rect class="panel" x="428" y="120" width="352" height="640" rx="14" fill="#f5f6f8" stroke="#d5dae1"/>
+<rect class="bar"   x="428" y="120" width="352" height="4"  rx="2"  fill="#1d4ed8"/>
+<text class="acc"   x="452" y="160" font-size="16" font-weight="700" letter-spacing="2.4" fill="#1d4ed8">ЭТАП 2</text>
+<text class="ink"   x="452" y="194" font-size="27" font-weight="700" fill="#12161d">Метрики</text>
+<text class="muted" x="452" y="222" font-size="17" fill="#59626f">39 полей на узел, направленный граф</text>
+
+<text class="acc" x="452" y="264" font-size="15" font-weight="700" letter-spacing="1.6" fill="#1d4ed8">СТРУКТУРА</text>
+<text class="ink" x="452" y="292" font-size="19" fill="#12161d">сколько плательщиков и</text>
+<text class="ink" x="452" y="318" font-size="19" fill="#12161d">получателей, pagerank,</text>
+<text class="ink" x="452" y="344" font-size="19" fill="#12161d">посредничество, HITS</text>
+
+<text class="acc" x="452" y="384" font-size="15" font-weight="700" letter-spacing="1.6" fill="#1d4ed8">ДЕНЬГИ</text>
+<text class="ink" x="452" y="412" font-size="19" fill="#12161d">получено и отдано, доля</text>
+<text class="ink" x="452" y="438" font-size="19" fill="#12161d">пропуска, сколько осело,</text>
+<text class="ink" x="452" y="464" font-size="19" fill="#12161d">приток извне выборки</text>
+
+<text class="acc" x="452" y="504" font-size="15" font-weight="700" letter-spacing="1.6" fill="#1d4ed8">ВРЕМЯ</text>
+<text class="ink" x="452" y="532" font-size="19" fill="#12161d">удержание ≤ 2 суток, сбор</text>
+<text class="ink" x="452" y="558" font-size="19" fill="#12161d">в один день, дробление</text>
+
+<line class="rule" x1="452" y1="586" x2="756" y2="586" stroke="#d5dae1"/>
+
+<text class="ink" x="452" y="618" font-size="17" font-weight="700" fill="#12161d">Пороги — квантили самих данных</text>
+<text class="ink" x="452" y="644" font-size="16" fill="#12161d">4 плательщика и 11 получателей —</text>
+<text class="ink" x="452" y="668" font-size="16" fill="#12161d">верхние 2,5% графа; крупный вход</text>
+<text class="ink" x="452" y="692" font-size="16" fill="#12161d">614 тыс. KZT — верхние 5%. Не подобраны</text>
+<text class="ink" x="452" y="716" font-size="16" fill="#12161d">руками, пересчитываются на прогоне</text>
+
+<!-- ═══════════ 3 · РОЛИ ═══════════ -->
+<rect class="panel" x="820" y="120" width="352" height="640" rx="14" fill="#f5f6f8" stroke="#d5dae1"/>
+<rect class="bar"   x="820" y="120" width="352" height="4"  rx="2"  fill="#1d4ed8"/>
+<text class="acc"   x="844" y="160" font-size="16" font-weight="700" letter-spacing="2.4" fill="#1d4ed8">ЭТАП 3</text>
+<text class="ink"   x="844" y="194" font-size="27" font-weight="700" fill="#12161d">Роли</text>
+<text class="muted" x="844" y="222" font-size="17" fill="#59626f">12 правил, первое сработавшее побеждает;</text>
+<text class="muted" x="844" y="244" font-size="17" fill="#59626f">у каждого узла записан rule_id</text>
+
+<text class="muted" x="844"  y="288" font-size="19" fill="#59626f">конечный получатель</text>
+<text class="ink"   x="1148" y="290" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">1 260</text>
+<rect class="bar"   x="844" y="298" width="300" height="7" rx="3.5" fill="#1d4ed8"/>
+
+<text class="muted" x="844"  y="342" font-size="19" fill="#59626f">периферия</text>
+<text class="ink"   x="1148" y="344" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">483</text>
+<rect class="bar"   x="844" y="352" width="115" height="7" rx="3.5" fill="#1d4ed8" opacity="0.8"/>
+
+<text class="muted" x="844"  y="396" font-size="19" fill="#59626f">транзит</text>
+<text class="ink"   x="1148" y="398" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">381</text>
+<rect class="bar"   x="844" y="406" width="91" height="7" rx="3.5" fill="#1d4ed8" opacity="0.8"/>
+
+<text class="muted" x="844"  y="450" font-size="19" fill="#59626f">веерный раздатчик</text>
+<text class="ink"   x="1148" y="452" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">54</text>
+<rect class="bar"   x="844" y="460" width="13" height="7" rx="3.5" fill="#1d4ed8" opacity="0.8"/>
+
+<text class="muted" x="844"  y="504" font-size="19" fill="#59626f">точка консолидации</text>
+<text class="ink"   x="1148" y="506" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">43</text>
+<rect class="bar"   x="844" y="514" width="10" height="7" rx="3.5" fill="#1d4ed8" opacity="0.8"/>
+
+<text class="muted" x="844"  y="558" font-size="19" fill="#59626f">координатор</text>
+<text class="ink"   x="1148" y="560" font-size="24" font-weight="700" text-anchor="end" fill="#12161d">27</text>
+<rect class="bar"   x="844" y="568" width="8" height="7" rx="3.5" fill="#1d4ed8" opacity="0.8"/>
+
+<rect class="soft"  x="844" y="594" width="304" height="100" rx="10" fill="#e6ecfd"/>
+<text class="ink"   x="864" y="626" font-size="17" font-weight="700" fill="#12161d">358 узлов роли не получили</text>
+<text class="ink"   x="864" y="652" font-size="16" fill="#12161d">обрезаны обходом, вероятность быть</text>
+<text class="ink"   x="864" y="676" font-size="16" fill="#12161d">конечным ниже 0,70 — «не знаю»</text>
+
+<text class="ink" x="844" y="724" font-size="16" fill="#12161d">72 кластера с гипотезами &#160;·&#160; приоритет —</text>
+<text class="ink" x="844" y="748" font-size="16" fill="#12161d">7 взвешенных наблюдаемых компонент</text>
+
+<!-- ═══════════ 4 · ИНТЕРФЕЙС ═══════════ -->
+<rect class="panel" x="1212" y="120" width="352" height="640" rx="14" fill="#f5f6f8" stroke="#d5dae1"/>
+<rect class="bar"   x="1212" y="120" width="352" height="4"  rx="2"  fill="#1d4ed8"/>
+<text class="acc"   x="1236" y="160" font-size="16" font-weight="700" letter-spacing="2.4" fill="#1d4ed8">ЭТАП 4</text>
+<text class="ink"   x="1236" y="194" font-size="27" font-weight="700" fill="#12161d">Интерфейс аналитика</text>
+<text class="muted" x="1236" y="222" font-size="17" fill="#59626f">zhetysu-team.kz</text>
+
+<circle class="acc" cx="1243" cy="263" r="5" fill="#1d4ed8"/>
+<circle class="acc" cx="1243" cy="355" r="5" fill="#1d4ed8"/>
+<circle class="acc" cx="1243" cy="421" r="5" fill="#1d4ed8"/>
+<circle class="acc" cx="1243" cy="487" r="5" fill="#1d4ed8"/>
+<circle class="acc" cx="1243" cy="529" r="5" fill="#1d4ed8"/>
+
+<text class="ink" x="1262" y="269" font-size="19" fill="#12161d">Схема сети: колена — кольцами,</text>
+<text class="ink" x="1262" y="295" font-size="19" fill="#12161d">кластеры — секторами, цвет —</text>
+<text class="ink" x="1262" y="321" font-size="19" fill="#12161d">роль, стрелка — направление</text>
+
+<text class="ink" x="1262" y="361" font-size="19" fill="#12161d">Топ-30 приоритетов, у каждого</text>
+<text class="ink" x="1262" y="387" font-size="19" fill="#12161d">обоснование словами и числами</text>
+
+<text class="ink" x="1262" y="427" font-size="19" fill="#12161d">Карточка узла: роль, правило,</text>
+<text class="ink" x="1262" y="453" font-size="19" fill="#12161d">числа, связи, что проверять</text>
+
+<text class="ink" x="1262" y="493" font-size="19" fill="#12161d">Поиск по gid и вопрос словами</text>
+
+<text class="ink" x="1262" y="535" font-size="19" fill="#12161d">Симулятор изъятия: топ-20 —</text>
+<text class="ink" x="1262" y="561" font-size="19" fill="#12161d">минус 9,4% оборота, случайные</text>
+<text class="ink" x="1262" y="587" font-size="19" fill="#12161d">20 — минус 1,7%</text>
+
+<line class="rule" x1="1236" y1="622" x2="1540" y2="622" stroke="#d5dae1"/>
+
+<text class="ink" x="1236" y="654" font-size="17" font-weight="700" fill="#12161d">Выгрузки для аналитика</text>
+<text class="ink" x="1236" y="682" font-size="16" fill="#12161d">nodes_roles.csv — 2 248 строк</text>
+<text class="ink" x="1236" y="708" font-size="16" fill="#12161d">clusters.csv — 72 строки</text>
+<text class="ink" x="1236" y="734" font-size="16" fill="#12161d">top_nodes.csv — 30 строк</text>
+
+<!-- ─────────── итог ─────────── -->
+<rect class="notebg" x="36" y="790" width="1528" height="96" rx="14" fill="#eef1f5" stroke="#d5dae1"/>
+<text class="ink"    x="60" y="830" font-size="22" font-weight="700" fill="#12161d">Вход: 81 известный клиент и выгрузка переводов. &#160;→&#160; Выход: роль с обоснованием у каждого из 2 248 и 30 приоритетов на проверку.</text>
+<text class="muted"  x="60" y="862" font-size="17" fill="#59626f">Одна команда, секунды на пересчёт при лимите ТЗ в 5 минут. Любую роль видно до правила и порога. Выводы — признаки для проверки, а не утверждение о виновности.</text>
+
+</g>
+</svg>
